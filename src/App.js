@@ -6,7 +6,9 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
-  signOut
+  signOut,
+  signInWithCustomToken,
+  signInAnonymously,
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -19,21 +21,15 @@ import {
   updateDoc,
   deleteDoc,
   getDoc,
-  setDoc
+  setDoc,
 } from 'firebase/firestore';
 
-// Gunakan konfigurasi Firebase yang disediakan oleh pengguna
-const firebaseConfig = {
-  apiKey: "AIzaSyA_OzSlTUylaTIHn44br1QeOfFzXN7Wx9E",
-  authDomain: "ruangsembangjims.firebaseapp.com",
-  projectId: "ruangsembangjims",
-  storageBucket: "ruangsembangjims.firebasestorage.app",
-  messagingSenderId: "691618255078",
-  appId: "1:691618255078:web:017c9188daa37626a62b27",
-  measurementId: "G-55XLKBYFYB"
-};
+// IMPORTANT: Use the global variables for Firebase configuration and authentication
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-// Inisialisasi Firebase
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -85,6 +81,8 @@ const App = () => {
   const [showModal, setShowModal] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [showChannelModal, setShowChannelModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [messageToDelete, setMessageToDelete] = useState(null);
 
   // Ref untuk auto-scroll dan mengesan mesej baru
   const chatWindowRef = useRef(null);
@@ -92,22 +90,35 @@ const App = () => {
 
   // Listener untuk status autentikasi
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (authUser) => {
+    const initAuth = async () => {
+      try {
+        if (initialAuthToken) {
+          await signInWithCustomToken(auth, initialAuthToken);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (error) {
+        console.error("Firebase Auth error:", error);
+      }
+    };
+    initAuth();
+
+    const unsub = onAuthStateChanged(auth, async (authUser) => {
       setUser(authUser);
       if (authUser) {
-        setIsAdmin(authUser.email.endsWith('@imi.gov.my'));
+        setIsAdmin(authUser.email?.endsWith('@imi.gov.my') || false); // Handle anonymous users
         // Simpan UID dan peran di Firestore saat login
         const userRef = doc(db, 'users', authUser.uid);
-        getDoc(userRef).then(docSnap => {
-          if (!docSnap.exists()) {
-            setDoc(userRef, {
-              email: authUser.email,
-              displayName: authUser.email.split('@')[0],
-              role: authUser.email.endsWith('@imi.gov.my') ? 'admin' : 'user',
-              createdAt: serverTimestamp()
-            });
-          }
-        });
+        const docSnap = await getDoc(userRef);
+        if (!docSnap.exists()) {
+          const role = authUser.email?.endsWith('@imi.gov.my') ? 'admin' : 'user';
+          await setDoc(userRef, {
+            email: authUser.email,
+            displayName: authUser.email?.split('@')[0] || `Pengguna ${authUser.uid.substring(0, 8)}`,
+            role,
+            createdAt: serverTimestamp(),
+          });
+        }
       }
       setIsAuthReady(true);
     });
@@ -127,7 +138,7 @@ const App = () => {
 
   // Listener untuk mesej dalam saluran yang dipilih
   useEffect(() => {
-    if (selectedChannel && user) {
+    if (selectedChannel && isAuthReady && user) {
       const messagesRef = collection(db, 'channels', selectedChannel.id, 'messages');
       const q = query(messagesRef);
       const unsub = onSnapshot(q, (snapshot) => {
@@ -137,7 +148,7 @@ const App = () => {
     } else {
       setMessages([]);
     }
-  }, [selectedChannel, user]);
+  }, [selectedChannel, isAuthReady, user]);
 
   // Efek untuk notifikasi mesej baru dan auto-scroll
   useEffect(() => {
@@ -151,7 +162,7 @@ const App = () => {
       chatWindowRef.current.scrollTop = chatWindowRef.current.scrollHeight;
     }
     prevMessageCount.current = messages.length;
-  }, [messages, selectedChannel, user]); // Tambahkan `selectedChannel` dan `user` sebagai dependensi
+  }, [messages, selectedChannel, user]);
 
   // Efek untuk tema dan saiz teks
   useEffect(() => {
@@ -202,15 +213,33 @@ const App = () => {
       showNotification(`Ralat: ${error.message}`);
     }
   };
+  
+  const handleDeleteMessage = (msg) => {
+    setMessageToDelete(msg);
+    setShowDeleteConfirm(true);
+  };
+  
+  const confirmDelete = async () => {
+    if (messageToDelete && selectedChannel) {
+      try {
+        await deleteDoc(doc(db, 'channels', selectedChannel.id, 'messages', messageToDelete.id));
+        showNotification('Mesej telah dipadam.');
+      } catch (error) {
+        showNotification(`Ralat memadam mesej: ${error.message}`);
+      }
+      setMessageToDelete(null);
+      setShowDeleteConfirm(false);
+    }
+  };
 
   // Fungsi chat
   const sendMessage = async (e) => {
     e.preventDefault();
-    if (!input.trim() || !selectedChannel) return;
+    if (!input.trim() || !selectedChannel || !user) return;
 
     await addDoc(collection(db, 'channels', selectedChannel.id, 'messages'), {
       senderId: user.uid,
-      senderName: user.email.split('@')[0],
+      senderName: user.email?.split('@')[0] || `Pengguna ${user.uid.substring(0, 8)}`,
       text: input,
       timestamp: serverTimestamp(),
       repliedTo: replyingTo ? {
@@ -331,6 +360,32 @@ const App = () => {
       </div>
     </Modal>
   );
+  
+  const DeleteConfirmModal = () => (
+    <Modal onClose={() => setShowDeleteConfirm(false)}>
+      <div className="text-center">
+        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Padam Mesej</h3>
+        <p className="text-gray-600 dark:text-gray-300">Adakah anda pasti mahu memadam mesej ini?</p>
+        <div className="mt-6 flex justify-center space-x-4">
+          <button
+            onClick={confirmDelete}
+            className="px-6 py-2 rounded-xl text-white font-bold bg-red-600 hover:bg-red-700 transition-colors"
+          >
+            Padam
+          </button>
+          <button
+            onClick={() => {
+              setMessageToDelete(null);
+              setShowDeleteConfirm(false);
+            }}
+            className="px-6 py-2 rounded-xl text-gray-900 dark:text-white font-bold bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+          >
+            Batal
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
 
   // Komponen paparan utama
   const ChatAppUI = () => (
@@ -339,7 +394,8 @@ const App = () => {
       <div className="flex flex-col w-1/4 min-w-[250px] bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700">
         <div className="p-4 border-b border-gray-200 dark:border-gray-700">
           <h1 className="text-2xl font-bold text-blue-600">JIMS Chat</h1>
-          <p className="text-sm mt-1 text-gray-500 dark:text-gray-400">Selamat datang, {user?.email.split('@')[0]} ({isAdmin ? 'Admin' : 'Pengguna Biasa'})</p>
+          <p className="text-sm mt-1 text-gray-500 dark:text-gray-400">Selamat datang, {user?.email?.split('@')[0] || `Pengguna ${user?.uid?.substring(0, 8)}`} ({isAdmin ? 'Admin' : 'Pengguna Biasa'})</p>
+          <p className="text-xs mt-1 text-gray-400 dark:text-gray-500 truncate">UserID: {user?.uid}</p>
         </div>
         <div className="flex-1 overflow-y-auto">
           {channels.map((channel) => (
@@ -400,11 +456,7 @@ const App = () => {
                   msg={msg}
                   user={user}
                   onReply={setReplyingTo}
-                  onDelete={() => {
-                    if (window.confirm('Adakah anda pasti mahu memadam mesej ini?')) {
-                      deleteDoc(doc(db, 'channels', selectedChannel.id, 'messages', msg.id));
-                    }
-                  }}
+                  onDelete={() => handleDeleteMessage(msg)}
                   onReact={async (emoji) => {
                     const messageRef = doc(db, 'channels', selectedChannel.id, 'messages', msg.id);
                     const currentReactions = msg.reactions || {};
@@ -525,12 +577,15 @@ const App = () => {
           </div>
         </Modal>
       )}
+      
+      {/* Modal pengesahan padam mesej */}
+      {showDeleteConfirm && <DeleteConfirmModal />}
     </div>
   );
 
   // Komponen bubble mesej
   const MessageBubble = ({ msg, user, onReply, onDelete, onReact }) => {
-    const isSender = msg.senderId === user.uid;
+    const isSender = msg.senderId === user?.uid;
     const [showContextMenu, setShowContextMenu] = useState(false);
     const contextMenuRef = useRef(null);
 
@@ -553,7 +608,7 @@ const App = () => {
       <div
         className={`flex ${isSender ? 'justify-end' : 'justify-start'}`}
         onContextMenu={handleContextMenu}
-        onDoubleClick={() => onReact('👍')} // Contoh reaksi cepat
+        onDoubleClick={() => onReact('👍')}
         onTouchStart={(e) => {
           // Touch long press detection
           const timer = setTimeout(() => handleContextMenu(e), 500);
@@ -596,7 +651,7 @@ const App = () => {
                 {isSender && (
                   <>
                     <li onClick={() => { /* edit logic */ setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">Sunting</li>
-                    <li onClick={() => { onDelete(); setShowContextMenu(false); }} className="px-4 py-2 text-red-500 hover:bg-red-100 dark:hover:bg-red-900 cursor-pointer">Padam</li>
+                    <li onClick={() => { onDelete(msg); setShowContextMenu(false); }} className="px-4 py-2 text-red-500 hover:bg-red-100 dark:hover:bg-red-900 cursor-pointer">Padam</li>
                   </>
                 )}
               </ul>
