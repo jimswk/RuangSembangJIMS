@@ -36,6 +36,7 @@ const firebaseConfig = {
   appId: "1:691618255078:web:017c9188daa37626a62b27",
   measurementId: "G-55XLKBYFYB"
 };
+// Semak sama ada pembolehubah global wujud sebelum menggunakannya
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
 // Inisialisasi Firebase
@@ -631,7 +632,7 @@ const App = () => {
   );
 
   const ReactionPicker = ({ msg, onReact, onClose }) => {
-    const emojis = ['�', '🤪', '🤫', '🙈', '👎', '👏', '🙏', '💖', '👍'];
+    const emojis = ['🤣', '🤪', '🤫', '�', '👎', '👏', '🙏', '💖', '👍'];
     return (
       <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 p-2 bg-white dark:bg-gray-700 rounded-full shadow-lg flex space-x-2">
         {emojis.map(emoji => (
@@ -913,7 +914,6 @@ const App = () => {
     const contextMenuRef = useRef(null);
     const isStarred = msg.starredBy?.includes(user?.uid);
     const [showReactionPicker, setShowReactionPicker] = useState(false);
-    const reactionPickerRef = useRef(null);
 
     const handleContextMenu = (e) => {
       e.preventDefault();
@@ -927,12 +927,14 @@ const App = () => {
     }
 
     const handleCopy = () => {
-      navigator.clipboard.writeText(msg.text).then(() => {
-        showNotification('Mesej disalin ke papan keratan!');
-      }).catch(err => {
-        console.error('Gagal menyalin: ', err);
-        showNotification('Gagal menyalin mesej.');
-      });
+      // document.execCommand('copy') is used for compatibility
+      const el = document.createElement('textarea');
+      el.value = msg.text;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+      showNotification('Mesej disalin ke papan keratan!');
       setShowContextMenu(false);
     };
 
@@ -941,13 +943,10 @@ const App = () => {
         if (contextMenuRef.current && !contextMenuRef.current.contains(event.target)) {
           setShowContextMenu(false);
         }
-        if (reactionPickerRef.current && !reactionPickerRef.current.contains(event.target)) {
-          setShowReactionPicker(false);
-        }
       };
       document.addEventListener("mousedown", handleClickOutside);
       return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, [contextMenuRef, reactionPickerRef]);
+    }, [contextMenuRef]);
 
     return (
       <div
@@ -1000,7 +999,7 @@ const App = () => {
                 <li onClick={() => { onStar(msg); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">{isStarred ? 'Unstar' : 'Star'}</li>
                 <li onClick={toggleReactionPicker} className="relative px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">
                   React
-                  {showReactionPicker && <ReactionPicker msg={msg} onReact={onReact} onClose={() => setShowReactionPicker(false)} />}
+                  {showReactionPicker && <ReactionPicker msg={msg} onReact={onReact} onClose={() => { setShowReactionPicker(false); setShowContextMenu(false); }} />}
                 </li>
                 {isSender && (
                   <>
@@ -1008,7 +1007,7 @@ const App = () => {
                     <li onClick={() => { onDelete(msg); setShowContextMenu(false); }} className="px-4 py-2 text-red-500 hover:bg-red-100 dark:hover:bg-red-900 cursor-pointer">Padam</li>
                   </>
                 )}
-                {activeTab === 'channels' && isAdmin && (
+                {activeTab === 'channels' && (
                   <li onClick={() => { onPin(msg); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">{msg.pinned ? 'Unpin' : 'Pin'}</li>
                 )}
               </ul>
