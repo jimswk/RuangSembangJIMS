@@ -7,6 +7,7 @@ import {
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
   signOut,
+  connectAuthEmulator,
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -21,14 +22,9 @@ import {
   getDoc,
   setDoc,
   where,
-  orderBy
+  orderBy,
+  connectFirestoreEmulator,
 } from 'firebase/firestore';
-
-// Optional: Enable Firestore emulator for local testing (uncomment to use)
-// import { connectFirestoreEmulator } from 'firebase/firestore';
-// if (process.env.NODE_ENV === 'development') {
-//   connectFirestoreEmulator(db, 'localhost', 8080);
-// }
 
 // Firebase configuration
 const firebaseConfig = {
@@ -38,13 +34,19 @@ const firebaseConfig = {
   storageBucket: "ruangsembangjims.firebasestorage.app",
   messagingSenderId: "691618255078",
   appId: "1:691618255078:web:017c9188daa37626a62b27",
-  measurementId: "G-55XLKBYFYB"
+  measurementId: "G-55XLKBYFYB",
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+// Enable Firebase emulators for local development
+if (process.env.NODE_ENV === 'development') {
+  connectAuthEmulator(auth, 'http://localhost:9099', { disableWarnings: true });
+  connectFirestoreEmulator(db, 'localhost', 8080);
+}
 
 // Modal component for alerts
 const Modal = ({ children, onClose }) => {
@@ -57,7 +59,20 @@ const Modal = ({ children, onClose }) => {
             onClick={onClose}
             className="absolute top-0 right-0 -mt-2 -mr-2 bg-red-500 text-white rounded-full p-1 shadow-lg hover:bg-red-600 transition-colors"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
           </button>
         </div>
       </div>
@@ -159,14 +174,14 @@ const App = () => {
         const messagesRef = collection(db, 'channels', selectedChannel.id, 'messages');
         const q = query(messagesRef, orderBy('timestamp'));
         unsub = onSnapshot(q, (snapshot) => {
-          setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+          setMessages(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
         });
       } else if (activeTab === 'dms' && selectedDMUser) {
         const chatId = [user.uid, selectedDMUser.id].sort().join('_');
         const dmRef = collection(db, 'privateChats', chatId, 'messages');
         const q = query(dmRef, orderBy('timestamp'));
         unsub = onSnapshot(q, (snapshot) => {
-          setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+          setMessages(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
         });
       } else {
         setMessages([]);
@@ -180,7 +195,9 @@ const App = () => {
     if (messages.length > prevMessageCount.current && chatWindowRef.current) {
       const lastMessage = messages[messages.length - 1];
       if (lastMessage && lastMessage.senderId !== user?.uid) {
-        showNotification(`Mesej baru dari ${lastMessage.senderName} di ${selectedChannel?.name || selectedDMUser?.displayName}`);
+        showNotification(
+          `Mesej baru dari ${lastMessage.senderName} di ${selectedChannel?.name || selectedDMUser?.displayName}`
+        );
       }
     }
     if (chatWindowRef.current) {
@@ -204,7 +221,7 @@ const App = () => {
       const messagesRef = collection(db, 'channels', selectedChannel.id, 'messages');
       const q = query(messagesRef, where('pinned', '==', true));
       const unsub = onSnapshot(q, (snapshot) => {
-        setPinnedMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        setPinnedMessages(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
       });
       return unsub;
     } else {
@@ -218,6 +235,15 @@ const App = () => {
     const email = e.target.email.value;
     const password = e.target.password.value;
 
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      showNotification('Sila masukkan alamat email yang sah.');
+      return;
+    }
+    if (authMode === 'register' && password.length < 6) {
+      showNotification('Kata laluan mestilah sekurang-kurangnya 6 aksara.');
+      return;
+    }
+
     try {
       if (authMode === 'register') {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -227,7 +253,7 @@ const App = () => {
           email,
           displayName: email.split('@')[0],
           role,
-          createdAt: serverTimestamp()
+          createdAt: serverTimestamp(),
         });
         showNotification('Pendaftaran berjaya! Selamat datang.');
       } else if (authMode === 'login') {
@@ -239,7 +265,25 @@ const App = () => {
       }
       setIsAuthModalOpen(false);
     } catch (error) {
-      showNotification(`Ralat: ${error.message}`);
+      console.error('Auth error:', error.code, error.message);
+      let message;
+      switch (error.code) {
+        case 'auth/invalid-email':
+          message = 'Alamat email tidak sah.';
+          break;
+        case 'auth/weak-password':
+          message = 'Kata laluan terlalu lemah. Sila gunakan sekurang-kurangnya 6 aksara.';
+          break;
+        case 'auth/email-already-in-use':
+          message = 'Alamat email ini sudah digunakan.';
+          break;
+        case 'auth/operation-not-allowed':
+          message = 'Pendaftaran email/kata laluan tidak dibenarkan. Sila hubungi pentadbir.';
+          break;
+        default:
+          message = `Ralat: ${error.message}`;
+      }
+      showNotification(message);
     }
   };
 
@@ -287,18 +331,19 @@ const App = () => {
   };
 
   const handleStarMessage = async (msg) => {
-    const messageRef = activeTab === 'channels' && selectedChannel
-      ? doc(db, 'channels', selectedChannel.id, 'messages', msg.id)
-      : doc(db, 'privateChats', [user.uid, selectedDMUser.id].sort().join('_'), 'messages', msg.id);
+    const messageRef =
+      activeTab === 'channels' && selectedChannel
+        ? doc(db, 'channels', selectedChannel.id, 'messages', msg.id)
+        : doc(db, 'privateChats', [user.uid, selectedDMUser.id].sort().join('_'), 'messages', msg.id);
 
     if (!messageRef) return;
     const isStarred = msg.starredBy?.includes(user.uid);
     let newStarredBy = isStarred
-      ? msg.starredBy.filter(id => id !== user.uid)
+      ? msg.starredBy.filter((id) => id !== user.uid)
       : [...(msg.starredBy || []), user.uid];
 
     await updateDoc(messageRef, {
-      starredBy: newStarredBy
+      starredBy: newStarredBy,
     });
   };
 
@@ -315,14 +360,16 @@ const App = () => {
       text: input,
       imageUrl: null,
       timestamp: serverTimestamp(),
-      repliedTo: replyingTo ? {
-        id: replyingTo.id,
-        senderName: replyingTo.senderName,
-        text: replyingTo.text
-      } : null,
+      repliedTo: replyingTo
+        ? {
+            id: replyingTo.id,
+            senderName: replyingTo.senderName,
+            text: replyingTo.text,
+          }
+        : null,
       reactions: {},
       starredBy: [],
-      edited: false
+      edited: false,
     };
 
     try {
@@ -365,15 +412,16 @@ const App = () => {
       creatorId: user.uid,
       isAdmin,
       userEmail: user.email,
-      authToken: auth.currentUser ? {
-        uid: auth.currentUser.uid,
-        email: auth.currentUser.email,
-        emailVerified: auth.currentUser.emailVerified
-      } : null
+      authToken: auth.currentUser
+        ? {
+            uid: auth.currentUser.uid,
+            email: auth.currentUser.email,
+            emailVerified: auth.currentUser.emailVerified,
+          }
+        : null,
     });
 
     // Validate inputs and admin status
-    // Client-side check, but Firestore rules will enforce on the server
     if (!isAdmin) {
       showNotification('Hanya admin boleh mencipta saluran.');
       return;
@@ -384,7 +432,7 @@ const App = () => {
     }
 
     try {
-      // Force refresh the authentication token to ensure email is up-to-date
+      // Force refresh the authentication token
       if (auth.currentUser) {
         await auth.currentUser.getIdToken(true);
       }
@@ -393,7 +441,7 @@ const App = () => {
         name: channelName,
         description: channelDesc,
         creatorId: user.uid,
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
       });
       await addDoc(collection(db, 'channels', docRef.id, 'messages'), {
         senderId: 'system',
@@ -458,7 +506,7 @@ const App = () => {
       repliedTo: null,
       reactions: {},
       starredBy: [],
-      edited: false
+      edited: false,
     };
 
     try {
@@ -466,14 +514,14 @@ const App = () => {
         const messageRef = collection(db, 'channels', targetId, 'messages');
         await addDoc(messageRef, {
           ...messageData,
-          text: `(Maju dari ${messageToForward.senderName}): ${messageToForward.text}`
+          text: `(Maju dari ${messageToForward.senderName}): ${messageToForward.text}`,
         });
       } else if (type === 'dm') {
         const chatId = [user.uid, targetId].sort().join('_');
         const messageRef = collection(db, 'privateChats', chatId, 'messages');
         await addDoc(messageRef, {
           ...messageData,
-          text: `(Maju dari ${messageToForward.senderName}): ${messageToForward.text}`
+          text: `(Maju dari ${messageToForward.senderName}): ${messageToForward.text}`,
         });
       }
       showNotification('Mesej berjaya dimajukan!');
@@ -491,9 +539,10 @@ const App = () => {
   };
 
   const handleReact = async (msg, emoji) => {
-    const messageRef = activeTab === 'channels' && selectedChannel
-      ? doc(db, 'channels', selectedChannel.id, 'messages', msg.id)
-      : doc(db, 'privateChats', [user.uid, selectedDMUser.id].sort().join('_'), 'messages', msg.id);
+    const messageRef =
+      activeTab === 'channels' && selectedChannel
+        ? doc(db, 'channels', selectedChannel.id, 'messages', msg.id)
+        : doc(db, 'privateChats', [user.uid, selectedDMUser.id].sort().join('_'), 'messages', msg.id);
     const currentReactions = msg.reactions || {};
     const newReactions = { ...currentReactions };
     newReactions[emoji] = (newReactions[emoji] || 0) + 1;
@@ -592,7 +641,7 @@ const App = () => {
 
       <div className="space-y-2">
         <h4 className="font-semibold">Saluran</h4>
-        {channels.map(channel => (
+        {channels.map((channel) => (
           <button
             key={channel.id}
             onClick={() => performForward(channel.id, 'channel')}
@@ -603,15 +652,17 @@ const App = () => {
         ))}
 
         <h4 className="font-semibold mt-4">Pengguna</h4>
-        {users.filter(u => u.id !== user.uid).map(dmUser => (
-          <button
-            key={dmUser.id}
-            onClick={() => performForward(dmUser.id, 'dm')}
-            className="w-full text-left p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700"
-          >
-            {dmUser.displayName}
-          </button>
-        ))}
+        {users
+          .filter((u) => u.id !== user.uid)
+          .map((dmUser) => (
+            <button
+              key={dmUser.id}
+              onClick={() => performForward(dmUser.id, 'dm')}
+              className="w-full text-left p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700"
+            >
+              {dmUser.displayName}
+            </button>
+          ))}
       </div>
     </Modal>
   );
@@ -621,19 +672,32 @@ const App = () => {
       <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4 text-center">Maklumat Mesej</h3>
       {messageInfo && (
         <div className="space-y-2 text-gray-700 dark:text-gray-300">
-          <p><strong>ID Mesej:</strong> {messageInfo.id}</p>
-          <p><strong>Pengirim:</strong> {messageInfo.senderName}</p>
-          <p><strong>Waktu:</strong> {messageInfo.timestamp?.toDate().toLocaleString()}</p>
+          <p>
+            <strong>ID Mesej:</strong> {messageInfo.id}
+          </p>
+          <p>
+            <strong>Pengirim:</strong> {messageInfo.senderName}
+          </p>
+          <p>
+            <strong>Waktu:</strong> {messageInfo.timestamp?.toDate().toLocaleString()}
+          </p>
           {messageInfo.edited && <p className="text-sm text-blue-500">Mesej ini telah disunting.</p>}
           {messageInfo.repliedTo && (
-            <p><strong>Balas kepada:</strong> {messageInfo.repliedTo.senderName}</p>
+            <p>
+              <strong>Balas kepada:</strong> {messageInfo.repliedTo.senderName}
+            </p>
           )}
           {Object.keys(messageInfo.reactions || {}).length > 0 && (
             <div>
               <strong>Reaksi:</strong>
               <div className="flex space-x-2 mt-1">
                 {Object.entries(messageInfo.reactions).map(([emoji, count]) => (
-                  <span key={emoji} className="bg-gray-200 dark:bg-gray-700 rounded-full px-2 py-1 text-sm">{emoji} {count}</span>
+                  <span
+                    key={emoji}
+                    className="bg-gray-200 dark:bg-gray-700 rounded-full px-2 py-1 text-sm"
+                  >
+                    {emoji} {count}
+                  </span>
                 ))}
               </div>
             </div>
@@ -647,10 +711,13 @@ const App = () => {
     const emojis = ['🤣', '🤫', '🙈', '👎', '👏', '🙏', '💖', '👍'];
     return (
       <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 p-2 bg-white dark:bg-gray-700 rounded-full shadow-lg flex space-x-2">
-        {emojis.map(emoji => (
+        {emojis.map((emoji) => (
           <button
             key={emoji}
-            onClick={() => { onReact(msg, emoji); onClose(); }}
+            onClick={() => {
+              onReact(msg, emoji);
+              onClose();
+            }}
             className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
           >
             {emoji}
@@ -667,7 +734,10 @@ const App = () => {
       <div className="flex flex-col w-1/4 min-w-[250px] bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700">
         <div className="p-4 border-b border-gray-200 dark:border-gray-700">
           <h1 className="text-2xl font-bold text-blue-600">JIMS Chat</h1>
-          <p className="text-sm mt-1 text-gray-500 dark:text-gray-400">Selamat datang, {user?.email?.split('@')[0] || `Pengguna ${user?.uid?.substring(0, 8)}`} ({isAdmin ? 'Admin' : 'Pengguna Biasa'})</p>
+          <p className="text-sm mt-1 text-gray-500 dark:text-gray-400">
+            Selamat datang, {user?.email?.split('@')[0] || `Pengguna ${user?.uid?.substring(0, 8)}`} (
+            {isAdmin ? 'Admin' : 'Pengguna Biasa'})
+          </p>
           <p className="text-xs mt-1 text-gray-400 dark:text-gray-500 truncate">UserID: {user?.uid}</p>
         </div>
 
@@ -675,20 +745,28 @@ const App = () => {
         <div className="flex justify-around p-2 border-b border-gray-200 dark:border-gray-700">
           <button
             onClick={() => handleSelectChannel(null)}
-            className={`flex-1 p-2 font-semibold text-center rounded-xl transition-colors ${activeTab === 'channels' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
+            className={`flex-1 p-2 font-semibold text-center rounded-xl transition-colors ${
+              activeTab === 'channels'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'
+            }`}
           >
             Saluran
           </button>
           <button
             onClick={() => handleSelectDMUser(null)}
-            className={`flex-1 p-2 font-semibold text-center rounded-xl transition-colors ${activeTab === 'dms' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
+            className={`flex-1 p-2 font-semibold text-center rounded-xl transition-colors ${
+              activeTab === 'dms'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'
+            }`}
           >
             Mesej Peribadi
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {activeTab === 'channels' && (
+          {activeTab === 'channels' &&
             channels.map((channel) => (
               <div
                 key={channel.id}
@@ -700,22 +778,22 @@ const App = () => {
                 <h3 className="text-lg font-semibold">{channel.name}</h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{channel.description}</p>
               </div>
-            ))
-          )}
-          {activeTab === 'dms' && (
-            users.filter(u => u.id !== user.uid).map((dmUser) => (
-              <div
-                key={dmUser.id}
-                onClick={() => handleSelectDMUser(dmUser)}
-                className={`p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
-                  selectedDMUser?.id === dmUser.id ? 'bg-blue-100 dark:bg-blue-900 border-l-4 border-blue-600' : ''
-                }`}
-              >
-                <h3 className="text-lg font-semibold">{dmUser.displayName}</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{dmUser.email}</p>
-              </div>
-            ))
-          )}
+            ))}
+          {activeTab === 'dms' &&
+            users
+              .filter((u) => u.id !== user.uid)
+              .map((dmUser) => (
+                <div
+                  key={dmUser.id}
+                  onClick={() => handleSelectDMUser(dmUser)}
+                  className={`p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
+                    selectedDMUser?.id === dmUser.id ? 'bg-blue-100 dark:bg-blue-900 border-l-4 border-blue-600' : ''
+                  }`}
+                >
+                  <h3 className="text-lg font-semibold">{dmUser.displayName}</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{dmUser.email}</p>
+                </div>
+              ))}
         </div>
         <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex flex-col space-y-2">
           {isAdmin && (
@@ -723,7 +801,20 @@ const App = () => {
               onClick={() => setShowChannelModal(true)}
               className="w-full py-2 px-4 rounded-xl text-white font-semibold bg-green-600 hover:bg-green-700 transition-colors flex items-center justify-center space-x-2"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
               <span>Cipta Saluran</span>
             </button>
           )}
@@ -731,14 +822,41 @@ const App = () => {
             onClick={() => setIsSettingsOpen(true)}
             className="w-full py-2 px-4 rounded-xl text-white font-semibold bg-gray-500 hover:bg-gray-600 transition-colors flex items-center justify-center space-x-2"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.39a2 2 0 0 0 .73 2.73l.15.08a2 2 0 0 1 1 1.73v.55a2 2 0 0 1-1 1.73l-.15.08a2 2 0 0 0-.73 2.73l.22.39a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.73v-.55a2 2 0 0 1 1-1.73l.15-.08a2 2 0 0 0 .73-2.73l-.22-.39a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.39a2 2 0 0 0 .73 2.73l.15.08a2 2 0 0 1 1 1.73v.55a2 2 0 0 1-1 1.73l-.15.08a2 2 0 0 0-.73 2.73l.22.39a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.73v-.55a2 2 0 0 1 1-1.73l.15-.08a2 2 0 0 0 .73-2.73l-.22-.39a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
             <span>Tetapan</span>
           </button>
           <button
             onClick={handleSignOut}
             className="w-full py-2 px-4 rounded-xl text-white font-semibold bg-red-600 hover:bg-red-700 transition-colors flex items-center justify-center space-x-2"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+              <polyline points="16 17 21 12 16 7"></polyline>
+              <line x1="21" y1="12" x2="9" y2="12"></line>
+            </svg>
             <span>Log Keluar</span>
           </button>
         </div>
@@ -751,10 +869,24 @@ const App = () => {
             {/* Chat header */}
             <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4">
               <h2 className="text-xl font-bold">{selectedChannel?.name || selectedDMUser?.displayName}</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">{selectedChannel?.description || selectedDMUser?.email}</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {selectedChannel?.description || selectedDMUser?.email}
+              </p>
               {activeTab === 'channels' && pinnedMessages.length > 0 && (
                 <div className="mt-2 p-2 bg-yellow-100 dark:bg-yellow-800 rounded-xl flex items-center space-x-2 text-sm text-gray-800 dark:text-gray-200">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L10 12L2 14L12 16L14 24L16 14L24 12L14 10L12 2Z"/></svg>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12 2L10 12L2 14L12 16L14 24L16 14L24 12L14 10L12 2Z" />
+                  </svg>
                   <span className="font-semibold">Mesej yang Dipin:</span>
                   <span className="truncate">{pinnedMessages[0].text}</span>
                 </div>
@@ -762,7 +894,11 @@ const App = () => {
             </div>
 
             {/* Message area */}
-            <div ref={chatWindowRef} className="flex-1 overflow-y-auto p-4 space-y-4" style={{ fontSize: `${fontSize}px` }}>
+            <div
+              ref={chatWindowRef}
+              className="flex-1 overflow-y-auto p-4 space-y-4"
+              style={{ fontSize: `${fontSize}px` }}
+            >
               {messages.map((msg) => (
                 <MessageBubble
                   key={msg.id}
@@ -772,7 +908,10 @@ const App = () => {
                   onDelete={() => handleDeleteMessage(msg)}
                   onEdit={() => handleEditMessage(msg)}
                   onForward={() => handleForwardMessage(msg)}
-                  onInfo={() => { setMessageInfo(msg); setShowMessageInfoModal(true); }}
+                  onInfo={() => {
+                    setMessageInfo(msg);
+                    setShowMessageInfoModal(true);
+                  }}
                   onPin={() => handlePinMessage(msg)}
                   onStar={() => handleStarMessage(msg)}
                   onReact={handleReact}
@@ -787,13 +926,28 @@ const App = () => {
             <div className="p-4 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
               {replyingTo && (
                 <div className="bg-gray-200 dark:bg-gray-700 p-2 rounded-t-xl mb-2 relative">
-                  <p className="text-sm font-semibold text-blue-600 dark:text-blue-300">Balas kepada {replyingTo.senderName}</p>
+                  <p className="text-sm font-semibold text-blue-600 dark:text-blue-300">
+                    Balas kepada {replyingTo.senderName}
+                  </p>
                   <p className="text-xs text-gray-600 dark:text-gray-300 truncate">{replyingTo.text}</p>
                   <button
                     onClick={() => setReplyingTo(null)}
                     className="absolute top-1 right-1 text-gray-500 hover:text-red-500"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
                   </button>
                 </div>
               )}
@@ -801,10 +955,26 @@ const App = () => {
                 <div className="bg-blue-200 dark:bg-blue-700 p-2 rounded-t-xl mb-2 relative">
                   <p className="text-sm font-semibold text-white">Menyunting mesej...</p>
                   <button
-                    onClick={() => { setEditingMessage(null); setInput(''); }}
+                    onClick={() => {
+                      setEditingMessage(null);
+                      setInput('');
+                    }}
                     className="absolute top-1 right-1 text-white hover:text-red-200"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
                   </button>
                 </div>
               )}
@@ -819,12 +989,40 @@ const App = () => {
                 />
                 <button
                   type="submit"
-                  className={`bg-blue-600 text-white p-3 rounded-xl shadow-lg transition-colors ${editingMessage ? 'hover:bg-green-700' : 'hover:bg-blue-700'}`}
+                  className={`bg-blue-600 text-white p-3 rounded-xl shadow-lg transition-colors ${
+                    editingMessage ? 'hover:bg-green-700' : 'hover:bg-blue-700'
+                  }`}
                 >
                   {editingMessage ? (
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5.34"/><polygon points="18 2 22 6 12 16 8 16 8 12 18 2"/></svg>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="24"
+                      height="24"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5.34" />
+                      <polygon points="18 2 22 6 12 16 8 16 8 12 18 2" />
+                    </svg>
                   ) : (
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="24"
+                      height="24"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <line x1="22" y1="2" x2="11" y2="13"></line>
+                      <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
                   )}
                 </button>
               </form>
@@ -847,13 +1045,27 @@ const App = () => {
           <form onSubmit={createChannel} className="space-y-4">
             <div>
               <label className="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Nama Saluran</label>
-              <input type="text" name="channelName" className="w-full px-4 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" required />
+              <input
+                type="text"
+                name="channelName"
+                className="w-full px-4 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
             </div>
             <div>
               <label className="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Deskripsi</label>
-              <textarea name="channelDesc" className="w-full px-4 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" required></textarea>
+              <textarea
+                name="channelDesc"
+                className="w-full px-4 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              ></textarea>
             </div>
-            <button type="submit" className="w-full py-3 rounded-xl text-white font-bold bg-green-600 hover:bg-green-700 transition-colors">Cipta</button>
+            <button
+              type="submit"
+              className="w-full py-3 rounded-xl text-white font-bold bg-green-600 hover:bg-green-700 transition-colors"
+            >
+              Cipta
+            </button>
           </form>
         </Modal>
       )}
@@ -868,13 +1080,17 @@ const App = () => {
               <div className="flex items-center space-x-4">
                 <button
                   onClick={() => handleThemeChange('light')}
-                  className={`px-4 py-2 rounded-xl font-semibold transition-colors ${theme === 'light' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100'}`}
+                  className={`px-4 py-2 rounded-xl font-semibold transition-colors ${
+                    theme === 'light' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+                  }`}
                 >
                   Mod Cerah
                 </button>
                 <button
                   onClick={() => handleThemeChange('dark')}
-                  className={`px-4 py-2 rounded-xl font-semibold transition-colors ${theme === 'dark' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100'}`}
+                  className={`px-4 py-2 rounded-xl font-semibold transition-colors ${
+                    theme === 'dark' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+                  }`}
                 >
                   Mod Gelap
                 </button>
@@ -953,8 +1169,8 @@ const App = () => {
           setShowContextMenu(false);
         }
       };
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [contextMenuRef]);
 
     return (
@@ -969,16 +1185,24 @@ const App = () => {
       >
         <div className={`flex flex-col max-w-[70%] ${isSender ? 'items-end' : 'items-start'}`}>
           {msg.repliedTo && (
-            <div className={`text-xs p-2 rounded-t-xl mb-1 ${isSender ? 'bg-blue-200 dark:bg-blue-700' : 'bg-gray-200 dark:bg-gray-700'}`}>
+            <div
+              className={`text-xs p-2 rounded-t-xl mb-1 ${
+                isSender ? 'bg-blue-200 dark:bg-blue-700' : 'bg-gray-200 dark:bg-gray-700'
+              }`}
+            >
               <p className="font-semibold text-blue-600 dark:text-blue-300">Balas kepada {msg.repliedTo.senderName}</p>
               <p className="text-gray-600 dark:text-gray-300 truncate">{msg.repliedTo.text}</p>
             </div>
           )}
-          <div className={`p-4 rounded-3xl relative shadow-md transition-all duration-200
+          <div
+            className={`p-4 rounded-3xl relative shadow-md transition-all duration-200
             ${isSender ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-bl-none'}
-            ${msg.senderId === 'system' ? 'bg-yellow-200 text-gray-800 dark:bg-yellow-800 dark:text-gray-200' : ''}`}>
+            ${msg.senderId === 'system' ? 'bg-yellow-200 text-gray-800 dark:bg-yellow-800 dark:text-gray-200' : ''}`}
+          >
             {msg.senderId !== 'system' && (
-              <p className={`font-semibold text-sm mb-1 ${isSender ? 'text-white' : 'text-blue-600 dark:text-blue-400'}`}>
+              <p
+                className={`font-semibold text-sm mb-1 ${isSender ? 'text-white' : 'text-blue-600 dark:text-blue-400'}`}
+              >
                 {msg.senderName}
               </p>
             )}
@@ -992,32 +1216,113 @@ const App = () => {
             {Object.keys(msg.reactions || {}).length > 0 && (
               <div className="absolute -bottom-3 right-0 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-full shadow-md text-xs">
                 {Object.entries(msg.reactions).map(([emoji, count]) => (
-                  <span key={emoji} className="mr-1">{emoji} {count}</span>
+                  <span key={emoji} className="mr-1">
+                    {emoji} {count}
+                  </span>
                 ))}
               </div>
             )}
           </div>
           {/* Context Menu */}
           {showContextMenu && (
-            <div ref={contextMenuRef} className="absolute z-10 bg-white dark:bg-gray-700 rounded-xl shadow-lg mt-1 overflow-hidden">
+            <div
+              ref={contextMenuRef}
+              className="absolute z-10 bg-white dark:bg-gray-700 rounded-xl shadow-lg mt-1 overflow-hidden"
+            >
               <ul className="text-sm text-gray-700 dark:text-gray-200">
-                <li onClick={() => { onReply(msg); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">Balas</li>
-                <li onClick={() => { handleCopy(); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">Salin</li>
-                <li onClick={() => { onForward(msg); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">Majukan</li>
-                <li onClick={() => { onInfo(); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">Info Mesej</li>
-                <li onClick={() => { onStar(msg); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">{isStarred ? 'Unstar' : 'Star'}</li>
-                <li onClick={toggleReactionPicker} className="relative px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">
+                <li
+                  onClick={() => {
+                    onReply(msg);
+                    setShowContextMenu(false);
+                  }}
+                  className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer"
+                >
+                  Balas
+                </li>
+                <li
+                  onClick={() => {
+                    handleCopy();
+                    setShowContextMenu(false);
+                  }}
+                  className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer"
+                >
+                  Salin
+                </li>
+                <li
+                  onClick={() => {
+                    onForward(msg);
+                    setShowContextMenu(false);
+                  }}
+                  className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer"
+                >
+                  Majukan
+                </li>
+                <li
+                  onClick={() => {
+                    onInfo();
+                    setShowContextMenu(false);
+                  }}
+                  className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer"
+                >
+                  Info Mesej
+                </li>
+                <li
+                  onClick={() => {
+                    onStar(msg);
+                    setShowContextMenu(false);
+                  }}
+                  className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer"
+                >
+                  {isStarred ? 'Unstar' : 'Star'}
+                </li>
+                <li
+                  onClick={toggleReactionPicker}
+                  className="relative px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer"
+                >
                   React
-                  {showReactionPicker && <ReactionPicker msg={msg} onReact={onReact} onClose={() => { setShowReactionPicker(false); setShowContextMenu(false); }} />}
+                  {showReactionPicker && (
+                    <ReactionPicker
+                      msg={msg}
+                      onReact={onReact}
+                      onClose={() => {
+                        setShowReactionPicker(false);
+                        setShowContextMenu(false);
+                      }}
+                    />
+                  )}
                 </li>
                 {isSender && (
                   <>
-                    <li onClick={() => { onEdit(msg); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">Sunting</li>
-                    <li onClick={() => { onDelete(msg); setShowContextMenu(false); }} className="px-4 py-2 text-red-500 hover:bg-red-100 dark:hover:bg-red-900 cursor-pointer">Padam</li>
+                    <li
+                      onClick={() => {
+                        onEdit(msg);
+                        setShowContextMenu(false);
+                      }}
+                      className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer"
+                    >
+                      Sunting
+                    </li>
+                    <li
+                      onClick={() => {
+                        onDelete(msg);
+                        setShowContextMenu(false);
+                      }}
+                      className="px-4 py-2 text-red-500 hover:bg-red-100 dark:hover:bg-red-900 cursor-pointer"
+                    >
+                      Padam
+                    </li>
                   </>
                 )}
                 {activeTab === 'channels' && (
-                  <li onClick={() => { onPin(msg); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">{msg.pinned ? 'Unpin' : 'Pin'}</li>
+                  <li
+                    onClick={() => {
+                      onPin(msg);
+                      setShowContextMenu(false);
+                    }}
+                    className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer"
+                  >
+                    {msg.pinned ? 'Unpin' : 'Pin'}
+                  </li>
                 )}
               </ul>
             </div>
