@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tambahkan gaya scrollbar kustom */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #9ca3af #e5e7eb; /* thumb color track color */
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: #e5e7eb; /* light gray */
+  border-radius: 10px;
+}
+.dark .scrollbar-thin::-webkit-scrollbar-track {
+  background: #374151; /* dark gray */
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: #9ca3af; /* medium gray */
+  border-radius: 10px;
+  border: 2px solid #e5e7eb; /* padding around thumb */
+}
+.dark .scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: #4b5563; /* darker gray */
+  border: 2px solid #374151;
+}
