@@ -36,7 +36,6 @@ const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__f
   appId: "1:691618255078:web:017c9188daa37626a62b27",
   measurementId: "G-55XLKBYFYB"
 };
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
 // Inisialisasi Firebase
 const app = initializeApp(firebaseConfig);
