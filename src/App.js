@@ -24,7 +24,13 @@ import {
   orderBy
 } from 'firebase/firestore';
 
-// Menggunakan konfigurasi Firebase yang disediakan oleh pengguna, atau fallback untuk binaan luar
+// Optional: Enable Firestore emulator for local testing (uncomment to use)
+// import { connectFirestoreEmulator } from 'firebase/firestore';
+// if (process.env.NODE_ENV === 'development') {
+//   connectFirestoreEmulator(db, 'localhost', 8080);
+// }
+
+// Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyA_OzSlTUylaTIHn44br1QeOfFzXN7Wx9E",
   authDomain: "ruangsembangjims.firebaseapp.com",
@@ -35,12 +41,12 @@ const firebaseConfig = {
   measurementId: "G-55XLKBYFYB"
 };
 
-// Inisialisasi Firebase
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Komponen Modal yang bergaya sebagai pengganti alert()
+// Modal component for alerts
 const Modal = ({ children, onClose }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm p-4">
@@ -59,31 +65,31 @@ const Modal = ({ children, onClose }) => {
   );
 };
 
-// Komponen utama aplikasi
+// Main App component
 const App = () => {
-  // State untuk autentikasi
+  // Authentication states
   const [user, setUser] = useState(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState('login'); // 'login', 'register', 'forgot'
 
-  // State untuk aplikasi sembang
+  // Chat app states
   const [channels, setChannels] = useState([]);
   const [selectedChannel, setSelectedChannel] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [users, setUsers] = useState([]); // List of all users for DM
+  const [users, setUsers] = useState([]);
   const [pinnedMessages, setPinnedMessages] = useState([]);
 
-  // State untuk UI
+  // UI states
   const [theme, setTheme] = useState('light');
   const [fontSize, setFontSize] = useState(16);
   const [activeTab, setActiveTab] = useState('channels'); // 'channels' or 'dms'
   const [selectedDMUser, setSelectedDMUser] = useState(null);
 
-  // State untuk fitur chat
+  // Chat feature states
   const [replyingTo, setReplyingTo] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
   const [showModal, setShowModal] = useState(false);
@@ -96,11 +102,11 @@ const App = () => {
   const [messageInfo, setMessageInfo] = useState(null);
   const [showMessageInfoModal, setShowMessageInfoModal] = useState(false);
 
-  // Ref untuk auto-scroll dan mengesan mesej baru
+  // Ref for auto-scroll and tracking new messages
   const chatWindowRef = useRef(null);
   const prevMessageCount = useRef(0);
 
-  // Listener untuk status autentikasi
+  // Authentication listener
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (authUser) => {
       setUser(authUser);
@@ -123,7 +129,7 @@ const App = () => {
     return unsub;
   }, []);
 
-  // Listener untuk semua pengguna (untuk DM)
+  // Listener for all users (for DMs)
   useEffect(() => {
     if (isAuthReady && user) {
       const q = query(collection(db, 'users'));
@@ -134,7 +140,7 @@ const App = () => {
     }
   }, [isAuthReady, user]);
 
-  // Listener untuk saluran (channels)
+  // Listener for channels
   useEffect(() => {
     if (isAuthReady && user) {
       const q = query(collection(db, 'channels'));
@@ -145,7 +151,7 @@ const App = () => {
     }
   }, [isAuthReady, user]);
 
-  // Listener untuk mesej dalam saluran yang dipilih atau DM
+  // Listener for messages in selected channel or DM
   useEffect(() => {
     if (user && isAuthReady) {
       let unsub;
@@ -169,7 +175,7 @@ const App = () => {
     }
   }, [selectedChannel, selectedDMUser, activeTab, isAuthReady, user]);
 
-  // Efek untuk notifikasi mesej baru dan auto-scroll
+  // Effect for new message notifications and auto-scroll
   useEffect(() => {
     if (messages.length > prevMessageCount.current && chatWindowRef.current) {
       const lastMessage = messages[messages.length - 1];
@@ -183,7 +189,7 @@ const App = () => {
     prevMessageCount.current = messages.length;
   }, [messages, selectedChannel, selectedDMUser, user]);
 
-  // Efek untuk tema dan saiz teks
+  // Effect for theme and font size
   useEffect(() => {
     const storedTheme = localStorage.getItem('theme') || 'light';
     const storedFontSize = localStorage.getItem('fontSize') || 16;
@@ -192,7 +198,7 @@ const App = () => {
     document.documentElement.className = storedTheme;
   }, []);
 
-  // Listener untuk mesej yang dipin
+  // Listener for pinned messages
   useEffect(() => {
     if (selectedChannel && user) {
       const messagesRef = collection(db, 'channels', selectedChannel.id, 'messages');
@@ -206,7 +212,7 @@ const App = () => {
     }
   }, [selectedChannel, user]);
 
-  // Fungsi autentikasi
+  // Authentication functions
   const handleAuth = async (e) => {
     e.preventDefault();
     const email = e.target.email.value;
@@ -296,7 +302,7 @@ const App = () => {
     });
   };
 
-  // Fungsi chat
+  // Chat functions
   const sendMessage = async (e) => {
     e.preventDefault();
     if (!input.trim() || (!selectedChannel && !selectedDMUser) || !user) return;
@@ -307,7 +313,7 @@ const App = () => {
       senderId: user.uid,
       senderName: user.email?.split('@')[0] || `Pengguna ${user.uid.substring(0, 8)}`,
       text: input,
-      imageUrl: null, // Image functionality removed
+      imageUrl: null,
       timestamp: serverTimestamp(),
       repliedTo: replyingTo ? {
         id: replyingTo.id,
@@ -346,7 +352,7 @@ const App = () => {
     }
   };
 
-  // Fungsi membuat saluran (hanya untuk admin)
+  // Create channel function (only for admins)
   const createChannel = async (e) => {
     e.preventDefault();
     const channelName = e.target.channelName.value;
@@ -358,7 +364,12 @@ const App = () => {
       channelDesc,
       creatorId: user.uid,
       isAdmin,
-      userEmail: user.email
+      userEmail: user.email,
+      authToken: auth.currentUser ? {
+        uid: auth.currentUser.uid,
+        email: auth.currentUser.email,
+        emailVerified: auth.currentUser.emailVerified
+      } : null
     });
 
     // Validate inputs and admin status
@@ -372,6 +383,11 @@ const App = () => {
     }
 
     try {
+      // Force refresh the authentication token to ensure email is up-to-date
+      if (auth.currentUser) {
+        await auth.currentUser.getIdToken(true);
+      }
+
       const docRef = await addDoc(collection(db, 'channels'), {
         name: channelName,
         description: channelDesc,
@@ -436,7 +452,7 @@ const App = () => {
       senderId: user.uid,
       senderName: user.email?.split('@')[0] || `Pengguna ${user.uid.substring(0, 8)}`,
       text: messageToForward.text,
-      imageUrl: null, // Image functionality removed
+      imageUrl: null,
       timestamp: serverTimestamp(),
       repliedTo: null,
       reactions: {},
@@ -483,7 +499,7 @@ const App = () => {
     await updateDoc(messageRef, { reactions: newReactions });
   };
 
-  // Komponen untuk paparan autentikasi
+  // Authentication modal
   const AuthModal = () => (
     <Modal onClose={() => setIsAuthModalOpen(false)}>
       <h2 className="text-2xl font-bold mb-4 text-center text-gray-900 dark:text-white">
@@ -627,7 +643,7 @@ const App = () => {
   );
 
   const ReactionPicker = ({ msg, onReact, onClose }) => {
-    const emojis = ['🤣', '', '🤫', '🙈', '👎', '👏', '🙏', '💖', '👍'];
+    const emojis = ['🤣', '🤫', '🙈', '👎', '👏', '🙏', '💖', '👍'];
     return (
       <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 p-2 bg-white dark:bg-gray-700 rounded-full shadow-lg flex space-x-2">
         {emojis.map(emoji => (
@@ -643,10 +659,10 @@ const App = () => {
     );
   };
 
-  // Komponen paparan utama
+  // Main chat UI
   const ChatAppUI = () => (
     <div className="flex h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-inter">
-      {/* Sidebar untuk Senarai Saluran dan DM */}
+      {/* Sidebar for channels and DMs */}
       <div className="flex flex-col w-1/4 min-w-[250px] bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700">
         <div className="p-4 border-b border-gray-200 dark:border-gray-700">
           <h1 className="text-2xl font-bold text-blue-600">JIMS Chat</h1>
@@ -654,7 +670,7 @@ const App = () => {
           <p className="text-xs mt-1 text-gray-400 dark:text-gray-500 truncate">UserID: {user?.uid}</p>
         </div>
 
-        {/* Tab untuk Saluran dan Mesej Peribadi */}
+        {/* Tabs for channels and DMs */}
         <div className="flex justify-around p-2 border-b border-gray-200 dark:border-gray-700">
           <button
             onClick={() => handleSelectChannel(null)}
@@ -727,11 +743,11 @@ const App = () => {
         </div>
       </div>
 
-      {/* Kawasan perbualan utama */}
+      {/* Main chat area */}
       <div className="flex-1 flex flex-col">
         {selectedChannel || selectedDMUser ? (
           <>
-            {/* Header chat */}
+            {/* Chat header */}
             <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4">
               <h2 className="text-xl font-bold">{selectedChannel?.name || selectedDMUser?.displayName}</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">{selectedChannel?.description || selectedDMUser?.email}</p>
@@ -744,7 +760,7 @@ const App = () => {
               )}
             </div>
 
-            {/* Ruang mesej */}
+            {/* Message area */}
             <div ref={chatWindowRef} className="flex-1 overflow-y-auto p-4 space-y-4" style={{ fontSize: `${fontSize}px` }}>
               {messages.map((msg) => (
                 <MessageBubble
@@ -766,7 +782,7 @@ const App = () => {
               ))}
             </div>
 
-            {/* Kotak input mesej */}
+            {/* Message input box */}
             <div className="p-4 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
               {replyingTo && (
                 <div className="bg-gray-200 dark:bg-gray-700 p-2 rounded-t-xl mb-2 relative">
@@ -823,7 +839,7 @@ const App = () => {
         )}
       </div>
 
-      {/* Modal untuk Cipta Saluran (hanya admin) */}
+      {/* Modal for creating channel (admin only) */}
       {showChannelModal && isAdmin && (
         <Modal onClose={() => setShowChannelModal(false)}>
           <h2 className="text-2xl font-bold mb-4 text-center text-gray-900 dark:text-white">Cipta Saluran Baru</h2>
@@ -841,12 +857,11 @@ const App = () => {
         </Modal>
       )}
 
-      {/* Modal untuk Tetapan */}
+      {/* Settings modal */}
       {isSettingsOpen && (
         <Modal onClose={() => setIsSettingsOpen(false)}>
           <h2 className="text-2xl font-bold mb-4 text-center text-gray-900 dark:text-white">Tetapan</h2>
           <div className="space-y-4">
-            {/* Tukar Tema */}
             <div>
               <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Tema</p>
               <div className="flex items-center space-x-4">
@@ -864,7 +879,6 @@ const App = () => {
                 </button>
               </div>
             </div>
-            {/* Tukar Saiz Teks */}
             <div>
               <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Saiz Teks</p>
               <input
@@ -881,7 +895,7 @@ const App = () => {
         </Modal>
       )}
 
-      {/* Modal notifikasi */}
+      {/* Notification modal */}
       {showModal && (
         <Modal onClose={() => setShowModal(false)}>
           <div className="text-center">
@@ -891,18 +905,18 @@ const App = () => {
         </Modal>
       )}
 
-      {/* Modal pengesahan padam mesej */}
+      {/* Delete confirmation modal */}
       {showDeleteConfirm && <DeleteConfirmModal />}
 
-      {/* Modal untuk memajukan mesej */}
+      {/* Forward message modal */}
       {showForwardModal && <ForwardModal />}
 
-      {/* Modal maklumat mesej */}
+      {/* Message info modal */}
       {showMessageInfoModal && <MessageInfoModal />}
     </div>
   );
 
-  // Komponen bubble mesej
+  // Message bubble component
   const MessageBubble = ({ msg, user, onReply, onDelete, onEdit, onForward, onInfo, onPin, onStar, onReact, activeTab, selectedChannel, selectedDMUser }) => {
     const isSender = msg.senderId === user?.uid;
     const [showContextMenu, setShowContextMenu] = useState(false);
@@ -913,7 +927,7 @@ const App = () => {
     const handleContextMenu = (e) => {
       e.preventDefault();
       setShowContextMenu(true);
-      setShowReactionPicker(false); // Sembunyikan picker jika menu dibuka
+      setShowReactionPicker(false);
     };
 
     const toggleReactionPicker = (e) => {
@@ -922,7 +936,6 @@ const App = () => {
     };
 
     const handleCopy = () => {
-      // document.execCommand('copy') is used for compatibility
       const el = document.createElement('textarea');
       el.value = msg.text;
       document.body.appendChild(el);
@@ -983,7 +996,7 @@ const App = () => {
               </div>
             )}
           </div>
-          {/* Konteks Menu */}
+          {/* Context Menu */}
           {showContextMenu && (
             <div ref={contextMenuRef} className="absolute z-10 bg-white dark:bg-gray-700 rounded-xl shadow-lg mt-1 overflow-hidden">
               <ul className="text-sm text-gray-700 dark:text-gray-200">
@@ -1013,7 +1026,7 @@ const App = () => {
     );
   };
 
-  // Paparkan UI yang sesuai berdasarkan status autentikasi
+  // Render UI based on authentication status
   if (!isAuthReady) {
     return (
       <div className="h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
