@@ -27,7 +27,7 @@ import {
 } from 'firebase/firestore';
 
 // Menggunakan konfigurasi Firebase yang disediakan oleh pengguna, atau fallback untuk binaan luar
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+const firebaseConfig = {
   apiKey: "AIzaSyA_OzSlTUylaTIHn44br1QeOfFzXN7Wx9E",
   authDomain: "ruangsembangjims.firebaseapp.com",
   projectId: "ruangsembangjims",
