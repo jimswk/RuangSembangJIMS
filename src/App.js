@@ -40,9 +40,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Tailwind CSS is assumed to be available
-// For lucide-react icons, we'll use inline SVGs as a fallback
-
 // Komponen Modal yang bergaya sebagai pengganti alert()
 const Modal = ({ children, onClose }) => {
   return (
@@ -176,7 +173,7 @@ const App = () => {
   useEffect(() => {
     if (messages.length > prevMessageCount.current && chatWindowRef.current) {
       const lastMessage = messages[messages.length - 1];
-      if (lastMessage.senderId !== user?.uid) {
+      if (lastMessage && lastMessage.senderId !== user?.uid) {
         showNotification(`Mesej baru dari ${lastMessage.senderName} di ${selectedChannel?.name || selectedDMUser?.displayName}`);
       }
     }
@@ -615,7 +612,7 @@ const App = () => {
   );
 
   const ReactionPicker = ({ msg, onReact, onClose }) => {
-    const emojis = ['🤣', '�', '🤫', '🙈', '👎', '👏', '🙏', '💖', '👍'];
+    const emojis = ['🤣', '', '🤫', '🙈', '👎', '👏', '🙏', '💖', '👍'];
     return (
       <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 p-2 bg-white dark:bg-gray-700 rounded-full shadow-lg flex space-x-2">
         {emojis.map(emoji => (
@@ -758,7 +755,7 @@ const App = () => {
             <div className="p-4 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
               {replyingTo && (
                 <div className="bg-gray-200 dark:bg-gray-700 p-2 rounded-t-xl mb-2 relative">
-                  <p className="text-sm font-semibold text-blue-600">Balas kepada {replyingTo.senderName}</p>
+                  <p className="text-sm font-semibold text-blue-600 dark:text-blue-300">Balas kepada {replyingTo.senderName}</p>
                   <p className="text-xs text-gray-600 dark:text-gray-300 truncate">{replyingTo.text}</p>
                   <button
                     onClick={() => setReplyingTo(null)}
