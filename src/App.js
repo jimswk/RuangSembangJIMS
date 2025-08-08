@@ -1,52 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { initializeApp } from 'firebase/app';
-import {
-  getAuth,
-  onAuthStateChanged,
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  sendPasswordResetEmail,
-  signOut,
-} from 'firebase/auth';
-import {
-  getFirestore,
-  collection,
-  query,
-  onSnapshot,
-  addDoc,
-  serverTimestamp,
-  doc,
-  updateDoc,
-  deleteDoc,
-  getDoc,
-  setDoc,
-  where,
-  orderBy
-} from 'firebase/firestore';
+import { createClient } from '@supabase/supabase-js';
 
-// Optional: Enable Firestore emulator for local testing (uncomment to use)
-// import { connectFirestoreEmulator } from 'firebase/firestore';
-// if (process.env.NODE_ENV === 'development') {
-//   connectFirestoreEmulator(db, 'localhost', 8080);
-// }
+// Pastikan anda menggantikan nilai di bawah dengan URL dan kunci projek Supabase anda
+const supabaseUrl = 'https://<your-project-id>.supabase.co';
+const supabaseAnonKey = '<your-anon-key>';
 
-// Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyA_OzSlTUylaTIHn44br1QeOfFzXN7Wx9E",
-  authDomain: "ruangsembangjims.firebaseapp.com",
-  projectId: "ruangsembangjims",
-  storageBucket: "ruangsembangjims.firebasestorage.app",
-  messagingSenderId: "691618255078",
-  appId: "1:691618255078:web:017c9188daa37626a62b27",
-  measurementId: "G-55XLKBYFYB"
-};
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-// Modal component for alerts
+// Komponen Modal untuk paparan alert
 const Modal = ({ children, onClose }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm p-4">
@@ -65,15 +26,15 @@ const Modal = ({ children, onClose }) => {
   );
 };
 
-// Main App component
+// Komponen utama aplikasi
 const App = () => {
-  // Authentication states
+  // States autentikasi
   const [user, setUser] = useState(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState('login'); // 'login', 'register', 'forgot'
 
-  // Chat app states
+  // States aplikasi chat
   const [channels, setChannels] = useState([]);
   const [selectedChannel, setSelectedChannel] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -83,13 +44,13 @@ const App = () => {
   const [users, setUsers] = useState([]);
   const [pinnedMessages, setPinnedMessages] = useState([]);
 
-  // UI states
+  // States UI
   const [theme, setTheme] = useState('light');
   const [fontSize, setFontSize] = useState(16);
   const [activeTab, setActiveTab] = useState('channels'); // 'channels' or 'dms'
   const [selectedDMUser, setSelectedDMUser] = useState(null);
 
-  // Chat feature states
+  // States fungsi chat
   const [replyingTo, setReplyingTo] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
   const [showModal, setShowModal] = useState(false);
@@ -102,85 +63,125 @@ const App = () => {
   const [messageInfo, setMessageInfo] = useState(null);
   const [showMessageInfoModal, setShowMessageInfoModal] = useState(false);
 
-  // Ref for auto-scroll and tracking new messages
+  // Ref untuk auto-scroll
   const chatWindowRef = useRef(null);
   const prevMessageCount = useRef(0);
 
-  // Authentication listener
+  // Listener autentikasi Supabase
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (authUser) => {
-      setUser(authUser);
-      if (authUser) {
-        setIsAdmin(authUser.email?.endsWith('@imi.gov.my') || false);
-        const userRef = doc(db, 'users', authUser.uid);
-        const docSnap = await getDoc(userRef);
-        if (!docSnap.exists()) {
-          const role = authUser.email?.endsWith('@imi.gov.my') ? 'admin' : 'user';
-          await setDoc(userRef, {
-            email: authUser.email,
-            displayName: authUser.email?.split('@')[0] || `Pengguna ${authUser.uid.substring(0, 8)}`,
-            role,
-            createdAt: serverTimestamp(),
-          });
-        }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        setIsAdmin(session.user.email?.endsWith('@imi.gov.my') || false);
       }
       setIsAuthReady(true);
     });
-    return unsub;
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  // Listener for all users (for DMs)
+  // Listener untuk semua pengguna (untuk DM)
   useEffect(() => {
     if (isAuthReady && user) {
-      const q = query(collection(db, 'users'));
-      const unsub = onSnapshot(q, (snapshot) => {
-        setUsers(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-      });
-      return unsub;
+      const fetchUsers = async () => {
+        const { data, error } = await supabase.from('users').select('*');
+        if (error) console.error(error);
+        setUsers(data || []);
+      };
+      
+      fetchUsers();
+
+      // Realtime listener untuk jadual users
+      const userSubscription = supabase
+        .channel('public:users')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, payload => {
+          fetchUsers();
+        })
+        .subscribe();
+
+      return () => supabase.removeChannel(userSubscription);
     }
   }, [isAuthReady, user]);
 
-  // Listener for channels
+  // Listener untuk saluran
   useEffect(() => {
     if (isAuthReady && user) {
-      const q = query(collection(db, 'channels'));
-      const unsub = onSnapshot(q, (snapshot) => {
-        setChannels(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-      });
-      return unsub;
+      const fetchChannels = async () => {
+        const { data, error } = await supabase.from('channels').select('*');
+        if (error) console.error(error);
+        setChannels(data || []);
+      };
+      
+      fetchChannels();
+
+      // Realtime listener untuk jadual channels
+      const channelSubscription = supabase
+        .channel('public:channels')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'channels' }, payload => {
+          fetchChannels();
+        })
+        .subscribe();
+
+      return () => supabase.removeChannel(channelSubscription);
     }
   }, [isAuthReady, user]);
 
-  // Listener for messages in selected channel or DM
+  // Listener untuk mesej dalam saluran atau DM yang dipilih
   useEffect(() => {
+    setMessages([]);
     if (user && isAuthReady) {
-      let unsub;
+      const fetchMessages = async () => {
+        let query = supabase.from('messages').select('*').order('created_at', { ascending: true });
+        
+        if (activeTab === 'channels' && selectedChannel) {
+          query = query.eq('channel_id', selectedChannel.id);
+        } else if (activeTab === 'dms' && selectedDMUser) {
+          const chatId = [user.id, selectedDMUser.id].sort().join('_');
+          query = query.eq('dm_chat_id', chatId);
+        } else {
+          return;
+        }
+
+        const { data, error } = await query;
+        if (error) console.error(error);
+        setMessages(data || []);
+      };
+
+      fetchMessages();
+
+      // Realtime listener untuk mesej
+      let messageSubscription;
       if (activeTab === 'channels' && selectedChannel) {
-        const messagesRef = collection(db, 'channels', selectedChannel.id, 'messages');
-        const q = query(messagesRef, orderBy('timestamp'));
-        unsub = onSnapshot(q, (snapshot) => {
-          setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        });
+        messageSubscription = supabase
+          .channel('messages_channel')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `channel_id=eq.${selectedChannel.id}` }, payload => {
+            fetchMessages();
+          })
+          .subscribe();
       } else if (activeTab === 'dms' && selectedDMUser) {
-        const chatId = [user.uid, selectedDMUser.id].sort().join('_');
-        const dmRef = collection(db, 'privateChats', chatId, 'messages');
-        const q = query(dmRef, orderBy('timestamp'));
-        unsub = onSnapshot(q, (snapshot) => {
-          setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        });
-      } else {
-        setMessages([]);
+        const chatId = [user.id, selectedDMUser.id].sort().join('_');
+        messageSubscription = supabase
+          .channel('messages_dm')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `dm_chat_id=eq.${chatId}` }, payload => {
+            fetchMessages();
+          })
+          .subscribe();
       }
-      return unsub;
+
+      return () => {
+        if (messageSubscription) {
+          supabase.removeChannel(messageSubscription);
+        }
+      };
     }
   }, [selectedChannel, selectedDMUser, activeTab, isAuthReady, user]);
 
-  // Effect for new message notifications and auto-scroll
+  // Kesan untuk notifikasi mesej baharu dan auto-scroll
   useEffect(() => {
     if (messages.length > prevMessageCount.current && chatWindowRef.current) {
       const lastMessage = messages[messages.length - 1];
-      if (lastMessage && lastMessage.senderId !== user?.uid) {
-        showNotification(`Mesej baru dari ${lastMessage.senderName} di ${selectedChannel?.name || selectedDMUser?.displayName}`);
+      if (lastMessage && lastMessage.sender_id !== user?.id) {
+        showNotification(`Mesej baru dari ${lastMessage.sender_name} di ${selectedChannel?.name || selectedDMUser?.display_name}`);
       }
     }
     if (chatWindowRef.current) {
@@ -189,7 +190,7 @@ const App = () => {
     prevMessageCount.current = messages.length;
   }, [messages, selectedChannel, selectedDMUser, user]);
 
-  // Effect for theme and font size
+  // Kesan untuk tema dan saiz fon
   useEffect(() => {
     const storedTheme = localStorage.getItem('theme') || 'light';
     const storedFontSize = localStorage.getItem('fontSize') || 16;
@@ -198,21 +199,37 @@ const App = () => {
     document.documentElement.className = storedTheme;
   }, []);
 
-  // Listener for pinned messages
+  // Listener untuk mesej yang dipin
   useEffect(() => {
     if (selectedChannel && user) {
-      const messagesRef = collection(db, 'channels', selectedChannel.id, 'messages');
-      const q = query(messagesRef, where('pinned', '==', true));
-      const unsub = onSnapshot(q, (snapshot) => {
-        setPinnedMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      });
-      return unsub;
+      const fetchPinnedMessages = async () => {
+        const { data, error } = await supabase
+          .from('messages')
+          .select('*')
+          .eq('channel_id', selectedChannel.id)
+          .eq('pinned', true);
+
+        if (error) console.error(error);
+        setPinnedMessages(data || []);
+      };
+      
+      fetchPinnedMessages();
+      
+      const pinSubscription = supabase
+        .channel('pinned_messages')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `channel_id=eq.${selectedChannel.id}` }, payload => {
+          fetchPinnedMessages();
+        })
+        .subscribe();
+
+      return () => supabase.removeChannel(pinSubscription);
+
     } else {
       setPinnedMessages([]);
     }
   }, [selectedChannel, user]);
 
-  // Authentication functions
+  // Fungsi autentikasi
   const handleAuth = async (e) => {
     e.preventDefault();
     const email = e.target.email.value;
@@ -220,21 +237,26 @@ const App = () => {
 
     try {
       if (authMode === 'register') {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        const userRef = doc(db, 'users', userCredential.user.uid);
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        
+        // Simpan data pengguna ke jadual 'users'
         const role = email.endsWith('@imi.gov.my') ? 'admin' : 'user';
-        await setDoc(userRef, {
-          email,
-          displayName: email.split('@')[0],
+        await supabase.from('users').insert({
+          id: data.user.id,
+          email: data.user.email,
+          display_name: data.user.email?.split('@')[0],
           role,
-          createdAt: serverTimestamp()
+          created_at: new Date()
         });
-        showNotification('Pendaftaran berjaya! Selamat datang.');
+        showNotification('Pendaftaran berjaya! Sila semak email anda untuk pengesahan.');
       } else if (authMode === 'login') {
-        await signInWithEmailAndPassword(auth, email, password);
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
         showNotification('Login berjaya! Selamat kembali.');
       } else if (authMode === 'forgot') {
-        await sendPasswordResetEmail(auth, email);
+        const { error } = await supabase.auth.resetPasswordForEmail(email);
+        if (error) throw error;
         showNotification('Pautan tetapan semula kata laluan telah dihantar ke email anda.');
       }
       setIsAuthModalOpen(false);
@@ -245,7 +267,8 @@ const App = () => {
 
   const handleSignOut = async () => {
     try {
-      await signOut(auth);
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
       showNotification('Anda telah log keluar.');
       setSelectedChannel(null);
       setSelectedDMUser(null);
@@ -262,12 +285,8 @@ const App = () => {
   const confirmDelete = async () => {
     if (messageToDelete && user) {
       try {
-        if (activeTab === 'channels' && selectedChannel) {
-          await deleteDoc(doc(db, 'channels', selectedChannel.id, 'messages', messageToDelete.id));
-        } else if (activeTab === 'dms' && selectedDMUser) {
-          const chatId = [user.uid, selectedDMUser.id].sort().join('_');
-          await deleteDoc(doc(db, 'privateChats', chatId, 'messages', messageToDelete.id));
-        }
+        const { error } = await supabase.from('messages').delete().eq('id', messageToDelete.id);
+        if (error) throw error;
         showNotification('Mesej telah dipadam.');
       } catch (error) {
         showNotification(`Ralat memadam mesej: ${error.message}`);
@@ -282,98 +301,84 @@ const App = () => {
       showNotification('Pin hanya tersedia di saluran.');
       return;
     }
-    const messageRef = doc(db, 'channels', selectedChannel.id, 'messages', msg.id);
-    await updateDoc(messageRef, { pinned: !msg.pinned });
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .update({ pinned: !msg.pinned })
+        .eq('id', msg.id);
+      if (error) throw error;
+    } catch (error) {
+      showNotification(`Ralat memin mesej: ${error.message}`);
+    }
   };
 
   const handleStarMessage = async (msg) => {
-    const messageRef = activeTab === 'channels' && selectedChannel
-      ? doc(db, 'channels', selectedChannel.id, 'messages', msg.id)
-      : doc(db, 'privateChats', [user.uid, selectedDMUser.id].sort().join('_'), 'messages', msg.id);
-
-    if (!messageRef) return;
-    const isStarred = msg.starredBy?.includes(user.uid);
-    let newStarredBy = isStarred
-      ? msg.starredBy.filter(id => id !== user.uid)
-      : [...(msg.starredBy || []), user.uid];
-
-    await updateDoc(messageRef, {
-      starredBy: newStarredBy
-    });
+    if (!user) return;
+    const currentStarredBy = msg.starred_by || [];
+    const isStarred = currentStarredBy.includes(user.id);
+    const newStarredBy = isStarred
+      ? currentStarredBy.filter(id => id !== user.id)
+      : [...currentStarredBy, user.id];
+    
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .update({ starred_by: newStarredBy })
+        .eq('id', msg.id);
+      if (error) throw error;
+    } catch (error) {
+      showNotification(`Ralat menanda bintang mesej: ${error.message}`);
+    }
   };
 
-  // Chat functions
+  // Fungsi chat
   const sendMessage = async (e) => {
     e.preventDefault();
     if (!input.trim() || (!selectedChannel && !selectedDMUser) || !user) return;
 
-    let messageCollectionRef;
-
     const messageData = {
-      senderId: user.uid,
-      senderName: user.email?.split('@')[0] || `Pengguna ${user.uid.substring(0, 8)}`,
+      sender_id: user.id,
+      sender_name: users.find(u => u.id === user.id)?.display_name || user.email?.split('@')[0],
       text: input,
-      imageUrl: null,
-      timestamp: serverTimestamp(),
-      repliedTo: replyingTo ? {
+      image_url: null,
+      replied_to: replyingTo ? {
         id: replyingTo.id,
-        senderName: replyingTo.senderName,
+        sender_name: replyingTo.senderName,
         text: replyingTo.text
       } : null,
       reactions: {},
-      starredBy: [],
       edited: false
     };
 
     try {
-      if (activeTab === 'channels' && selectedChannel) {
-        messageCollectionRef = collection(db, 'channels', selectedChannel.id, 'messages');
-      } else if (activeTab === 'dms' && selectedDMUser) {
-        const chatId = [user.uid, selectedDMUser.id].sort().join('_');
-        messageCollectionRef = collection(db, 'privateChats', chatId, 'messages');
-      }
-
-      if (messageCollectionRef) {
-        if (editingMessage) {
-          await updateDoc(doc(messageCollectionRef, editingMessage.id), {
-            text: input,
-            edited: true,
-          });
-          setEditingMessage(null);
-        } else {
-          await addDoc(messageCollectionRef, messageData);
+      if (editingMessage) {
+        await supabase
+          .from('messages')
+          .update({ text: input, edited: true })
+          .eq('id', editingMessage.id);
+        setEditingMessage(null);
+      } else {
+        if (activeTab === 'channels' && selectedChannel) {
+          await supabase.from('messages').insert([{ ...messageData, channel_id: selectedChannel.id }]);
+        } else if (activeTab === 'dms' && selectedDMUser) {
+          const chatId = [user.id, selectedDMUser.id].sort().join('_');
+          await supabase.from('messages').insert([{ ...messageData, dm_chat_id: chatId }]);
         }
-
-        setInput('');
-        setReplyingTo(null);
       }
+
+      setInput('');
+      setReplyingTo(null);
     } catch (error) {
       showNotification(`Ralat menghantar mesej: ${error.message}`);
     }
   };
 
-  // Create channel function (only for admins)
+  // Fungsi cipta saluran (hanya untuk admin)
   const createChannel = async (e) => {
     e.preventDefault();
     const channelName = e.target.channelName.value;
     const channelDesc = e.target.channelDesc.value;
 
-    // Log input values and user state for debugging
-    console.log('Creating channel with:', {
-      channelName,
-      channelDesc,
-      creatorId: user.uid,
-      isAdmin,
-      userEmail: user.email,
-      authToken: auth.currentUser ? {
-        uid: auth.currentUser.uid,
-        email: auth.currentUser.email,
-        emailVerified: auth.currentUser.emailVerified
-      } : null
-    });
-
-    // Validate inputs and admin status
-    // Client-side check, but Firestore rules will enforce on the server
     if (!isAdmin) {
       showNotification('Hanya admin boleh mencipta saluran.');
       return;
@@ -384,28 +389,28 @@ const App = () => {
     }
 
     try {
-      // Force refresh the authentication token to ensure email is up-to-date
-      if (auth.currentUser) {
-        await auth.currentUser.getIdToken(true);
-      }
+      const { data, error } = await supabase
+        .from('channels')
+        .insert([{
+          name: channelName,
+          description: channelDesc,
+          creator_id: user.id
+        }])
+        .select();
 
-      const docRef = await addDoc(collection(db, 'channels'), {
-        name: channelName,
-        description: channelDesc,
-        creatorId: user.uid,
-        createdAt: serverTimestamp()
-      });
-      await addDoc(collection(db, 'channels', docRef.id, 'messages'), {
-        senderId: 'system',
-        senderName: 'Sistem',
+      if (error) throw error;
+
+      await supabase.from('messages').insert([{
+        sender_id: 'system',
+        sender_name: 'Sistem',
         text: `Saluran "${channelName}" telah dicipta. Deskripsi: "${channelDesc}".`,
-        timestamp: serverTimestamp(),
-      });
+        channel_id: data[0].id,
+      }]);
       showNotification('Saluran baru berjaya dicipta.');
       setShowChannelModal(false);
     } catch (error) {
-      console.error('Error creating channel:', error.code, error.message);
-      showNotification(`Ralat: ${error.code} - ${error.message}`);
+      console.error('Error creating channel:', error.message);
+      showNotification(`Ralat: ${error.message}`);
     }
   };
 
@@ -425,14 +430,21 @@ const App = () => {
     localStorage.setItem('fontSize', newSize);
   };
 
-  const handleSelectDMUser = (dmUser) => {
-    if (dmUser.id === user.uid) {
+  const handleSelectDMUser = async (dmUser) => {
+    if (dmUser.id === user.id) {
       showNotification('Anda tidak boleh menghantar DM kepada diri sendiri.');
       return;
     }
     setActiveTab('dms');
     setSelectedDMUser(dmUser);
     setSelectedChannel(null);
+
+    // Cipta private chat jika belum wujud
+    const chatId = [user.id, dmUser.id].sort().join('_');
+    const { data } = await supabase.from('private_chats').select('id').eq('id', chatId);
+    if (!data || data.length === 0) {
+      await supabase.from('private_chats').insert({ id: chatId });
+    }
   };
 
   const handleSelectChannel = (channel) => {
@@ -450,31 +462,21 @@ const App = () => {
     if (!messageToForward || !user) return;
 
     const messageData = {
-      senderId: user.uid,
-      senderName: user.email?.split('@')[0] || `Pengguna ${user.uid.substring(0, 8)}`,
-      text: messageToForward.text,
-      imageUrl: null,
-      timestamp: serverTimestamp(),
-      repliedTo: null,
+      sender_id: user.id,
+      sender_name: users.find(u => u.id === user.id)?.display_name || user.email?.split('@')[0],
+      text: `(Maju dari ${messageToForward.sender_name}): ${messageToForward.text}`,
+      image_url: null,
+      replied_to: null,
       reactions: {},
-      starredBy: [],
       edited: false
     };
 
     try {
       if (type === 'channel') {
-        const messageRef = collection(db, 'channels', targetId, 'messages');
-        await addDoc(messageRef, {
-          ...messageData,
-          text: `(Maju dari ${messageToForward.senderName}): ${messageToForward.text}`
-        });
+        await supabase.from('messages').insert([{ ...messageData, channel_id: targetId }]);
       } else if (type === 'dm') {
-        const chatId = [user.uid, targetId].sort().join('_');
-        const messageRef = collection(db, 'privateChats', chatId, 'messages');
-        await addDoc(messageRef, {
-          ...messageData,
-          text: `(Maju dari ${messageToForward.senderName}): ${messageToForward.text}`
-        });
+        const chatId = [user.id, targetId].sort().join('_');
+        await supabase.from('messages').insert([{ ...messageData, dm_chat_id: chatId }]);
       }
       showNotification('Mesej berjaya dimajukan!');
       setShowForwardModal(false);
@@ -491,16 +493,22 @@ const App = () => {
   };
 
   const handleReact = async (msg, emoji) => {
-    const messageRef = activeTab === 'channels' && selectedChannel
-      ? doc(db, 'channels', selectedChannel.id, 'messages', msg.id)
-      : doc(db, 'privateChats', [user.uid, selectedDMUser.id].sort().join('_'), 'messages', msg.id);
     const currentReactions = msg.reactions || {};
     const newReactions = { ...currentReactions };
     newReactions[emoji] = (newReactions[emoji] || 0) + 1;
-    await updateDoc(messageRef, { reactions: newReactions });
+    
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .update({ reactions: newReactions })
+        .eq('id', msg.id);
+      if (error) throw error;
+    } catch (error) {
+      showNotification(`Ralat menambah reaksi: ${error.message}`);
+    }
   };
-
-  // Authentication modal
+  
+  // Modal autentikasi
   const AuthModal = () => (
     <Modal onClose={() => setIsAuthModalOpen(false)}>
       <h2 className="text-2xl font-bold mb-4 text-center text-gray-900 dark:text-white">
@@ -603,13 +611,13 @@ const App = () => {
         ))}
 
         <h4 className="font-semibold mt-4">Pengguna</h4>
-        {users.filter(u => u.id !== user.uid).map(dmUser => (
+        {users.filter(u => u.id !== user.id).map(dmUser => (
           <button
             key={dmUser.id}
             onClick={() => performForward(dmUser.id, 'dm')}
             className="w-full text-left p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700"
           >
-            {dmUser.displayName}
+            {dmUser.display_name}
           </button>
         ))}
       </div>
@@ -622,11 +630,11 @@ const App = () => {
       {messageInfo && (
         <div className="space-y-2 text-gray-700 dark:text-gray-300">
           <p><strong>ID Mesej:</strong> {messageInfo.id}</p>
-          <p><strong>Pengirim:</strong> {messageInfo.senderName}</p>
-          <p><strong>Waktu:</strong> {messageInfo.timestamp?.toDate().toLocaleString()}</p>
+          <p><strong>Pengirim:</strong> {messageInfo.sender_name}</p>
+          <p><strong>Waktu:</strong> {new Date(messageInfo.created_at).toLocaleString()}</p>
           {messageInfo.edited && <p className="text-sm text-blue-500">Mesej ini telah disunting.</p>}
-          {messageInfo.repliedTo && (
-            <p><strong>Balas kepada:</strong> {messageInfo.repliedTo.senderName}</p>
+          {messageInfo.replied_to && (
+            <p><strong>Balas kepada:</strong> {messageInfo.replied_to.sender_name}</p>
           )}
           {Object.keys(messageInfo.reactions || {}).length > 0 && (
             <div>
@@ -660,18 +668,18 @@ const App = () => {
     );
   };
 
-  // Main chat UI
+  // UI utama aplikasi chat
   const ChatAppUI = () => (
     <div className="flex h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-inter">
-      {/* Sidebar for channels and DMs */}
+      {/* Sidebar untuk saluran dan DM */}
       <div className="flex flex-col w-1/4 min-w-[250px] bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700">
         <div className="p-4 border-b border-gray-200 dark:border-gray-700">
           <h1 className="text-2xl font-bold text-blue-600">JIMS Chat</h1>
-          <p className="text-sm mt-1 text-gray-500 dark:text-gray-400">Selamat datang, {user?.email?.split('@')[0] || `Pengguna ${user?.uid?.substring(0, 8)}`} ({isAdmin ? 'Admin' : 'Pengguna Biasa'})</p>
-          <p className="text-xs mt-1 text-gray-400 dark:text-gray-500 truncate">UserID: {user?.uid}</p>
+          <p className="text-sm mt-1 text-gray-500 dark:text-gray-400">Selamat datang, {users.find(u => u.id === user.id)?.display_name || user?.email?.split('@')[0]} ({isAdmin ? 'Admin' : 'Pengguna Biasa'})</p>
+          <p className="text-xs mt-1 text-gray-400 dark:text-gray-500 truncate">UserID: {user?.id}</p>
         </div>
 
-        {/* Tabs for channels and DMs */}
+        {/* Tabs untuk saluran dan DM */}
         <div className="flex justify-around p-2 border-b border-gray-200 dark:border-gray-700">
           <button
             onClick={() => handleSelectChannel(null)}
@@ -703,7 +711,7 @@ const App = () => {
             ))
           )}
           {activeTab === 'dms' && (
-            users.filter(u => u.id !== user.uid).map((dmUser) => (
+            users.filter(u => u.id !== user.id).map((dmUser) => (
               <div
                 key={dmUser.id}
                 onClick={() => handleSelectDMUser(dmUser)}
@@ -711,7 +719,7 @@ const App = () => {
                   selectedDMUser?.id === dmUser.id ? 'bg-blue-100 dark:bg-blue-900 border-l-4 border-blue-600' : ''
                 }`}
               >
-                <h3 className="text-lg font-semibold">{dmUser.displayName}</h3>
+                <h3 className="text-lg font-semibold">{dmUser.display_name}</h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{dmUser.email}</p>
               </div>
             ))
@@ -750,7 +758,7 @@ const App = () => {
           <>
             {/* Chat header */}
             <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4">
-              <h2 className="text-xl font-bold">{selectedChannel?.name || selectedDMUser?.displayName}</h2>
+              <h2 className="text-xl font-bold">{selectedChannel?.name || selectedDMUser?.display_name}</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">{selectedChannel?.description || selectedDMUser?.email}</p>
               {activeTab === 'channels' && pinnedMessages.length > 0 && (
                 <div className="mt-2 p-2 bg-yellow-100 dark:bg-yellow-800 rounded-xl flex items-center space-x-2 text-sm text-gray-800 dark:text-gray-200">
@@ -779,6 +787,7 @@ const App = () => {
                   activeTab={activeTab}
                   selectedChannel={selectedChannel}
                   selectedDMUser={selectedDMUser}
+                  users={users}
                 />
               ))}
             </div>
@@ -787,7 +796,7 @@ const App = () => {
             <div className="p-4 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
               {replyingTo && (
                 <div className="bg-gray-200 dark:bg-gray-700 p-2 rounded-t-xl mb-2 relative">
-                  <p className="text-sm font-semibold text-blue-600 dark:text-blue-300">Balas kepada {replyingTo.senderName}</p>
+                  <p className="text-sm font-semibold text-blue-600 dark:text-blue-300">Balas kepada {replyingTo.sender_name}</p>
                   <p className="text-xs text-gray-600 dark:text-gray-300 truncate">{replyingTo.text}</p>
                   <button
                     onClick={() => setReplyingTo(null)}
@@ -840,7 +849,7 @@ const App = () => {
         )}
       </div>
 
-      {/* Modal for creating channel (admin only) */}
+      {/* Modal untuk mencipta saluran (admin sahaja) */}
       {showChannelModal && isAdmin && (
         <Modal onClose={() => setShowChannelModal(false)}>
           <h2 className="text-2xl font-bold mb-4 text-center text-gray-900 dark:text-white">Cipta Saluran Baru</h2>
@@ -858,7 +867,7 @@ const App = () => {
         </Modal>
       )}
 
-      {/* Settings modal */}
+      {/* Modal tetapan */}
       {isSettingsOpen && (
         <Modal onClose={() => setIsSettingsOpen(false)}>
           <h2 className="text-2xl font-bold mb-4 text-center text-gray-900 dark:text-white">Tetapan</h2>
@@ -896,7 +905,7 @@ const App = () => {
         </Modal>
       )}
 
-      {/* Notification modal */}
+      {/* Modal notifikasi */}
       {showModal && (
         <Modal onClose={() => setShowModal(false)}>
           <div className="text-center">
@@ -906,24 +915,26 @@ const App = () => {
         </Modal>
       )}
 
-      {/* Delete confirmation modal */}
+      {/* Modal pengesahan padam */}
       {showDeleteConfirm && <DeleteConfirmModal />}
 
-      {/* Forward message modal */}
+      {/* Modal majukan mesej */}
       {showForwardModal && <ForwardModal />}
 
-      {/* Message info modal */}
+      {/* Modal info mesej */}
       {showMessageInfoModal && <MessageInfoModal />}
     </div>
   );
 
-  // Message bubble component
-  const MessageBubble = ({ msg, user, onReply, onDelete, onEdit, onForward, onInfo, onPin, onStar, onReact, activeTab, selectedChannel, selectedDMUser }) => {
-    const isSender = msg.senderId === user?.uid;
+  // Komponen gelembung mesej
+  const MessageBubble = ({ msg, user, onReply, onDelete, onEdit, onForward, onInfo, onPin, onStar, onReact, activeTab, users }) => {
+    const isSender = msg.sender_id === user?.id;
     const [showContextMenu, setShowContextMenu] = useState(false);
     const contextMenuRef = useRef(null);
-    const isStarred = msg.starredBy?.includes(user?.uid);
+    const isStarred = msg.starred_by?.includes(user?.id);
     const [showReactionPicker, setShowReactionPicker] = useState(false);
+    const sender = users.find(u => u.id === msg.sender_id);
+    const senderName = sender ? sender.display_name : 'Sistem';
 
     const handleContextMenu = (e) => {
       e.preventDefault();
@@ -968,18 +979,18 @@ const App = () => {
         }}
       >
         <div className={`flex flex-col max-w-[70%] ${isSender ? 'items-end' : 'items-start'}`}>
-          {msg.repliedTo && (
+          {msg.replied_to && (
             <div className={`text-xs p-2 rounded-t-xl mb-1 ${isSender ? 'bg-blue-200 dark:bg-blue-700' : 'bg-gray-200 dark:bg-gray-700'}`}>
-              <p className="font-semibold text-blue-600 dark:text-blue-300">Balas kepada {msg.repliedTo.senderName}</p>
-              <p className="text-gray-600 dark:text-gray-300 truncate">{msg.repliedTo.text}</p>
+              <p className="font-semibold text-blue-600 dark:text-blue-300">Balas kepada {msg.replied_to.sender_name}</p>
+              <p className="text-gray-600 dark:text-gray-300 truncate">{msg.replied_to.text}</p>
             </div>
           )}
           <div className={`p-4 rounded-3xl relative shadow-md transition-all duration-200
             ${isSender ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-bl-none'}
-            ${msg.senderId === 'system' ? 'bg-yellow-200 text-gray-800 dark:bg-yellow-800 dark:text-gray-200' : ''}`}>
-            {msg.senderId !== 'system' && (
+            ${msg.sender_id === 'system' ? 'bg-yellow-200 text-gray-800 dark:bg-yellow-800 dark:text-gray-200' : ''}`}>
+            {msg.sender_id !== 'system' && (
               <p className={`font-semibold text-sm mb-1 ${isSender ? 'text-white' : 'text-blue-600 dark:text-blue-400'}`}>
-                {msg.senderName}
+                {senderName}
               </p>
             )}
             <p>{msg.text}</p>
@@ -987,7 +998,7 @@ const App = () => {
               {msg.edited && <span className="italic mr-2 text-gray-300 dark:text-gray-500">(disunting)</span>}
               {isStarred && <span className="mr-1 text-yellow-400">★</span>}
               {msg.pinned && <span className="mr-1 text-red-500">📌</span>}
-              <span>{msg.timestamp?.toDate().toLocaleTimeString()}</span>
+              <span>{new Date(msg.created_at).toLocaleTimeString()}</span>
             </div>
             {Object.keys(msg.reactions || {}).length > 0 && (
               <div className="absolute -bottom-3 right-0 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-full shadow-md text-xs">
@@ -1027,7 +1038,7 @@ const App = () => {
     );
   };
 
-  // Render UI based on authentication status
+  // Render UI berdasarkan status autentikasi
   if (!isAuthReady) {
     return (
       <div className="h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
