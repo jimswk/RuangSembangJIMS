@@ -373,6 +373,7 @@ const App = () => {
     });
 
     // Validate inputs and admin status
+    // Client-side check, but Firestore rules will enforce on the server
     if (!isAdmin) {
       showNotification('Hanya admin boleh mencipta saluran.');
       return;
