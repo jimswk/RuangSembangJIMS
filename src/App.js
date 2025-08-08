@@ -107,19 +107,6 @@ const App = () => {
 
   // Listener untuk status autentikasi
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (initialAuthToken) {
-          await signInWithCustomToken(auth, initialAuthToken);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (error) {
-        console.error("Firebase Auth error:", error);
-      }
-    };
-    initAuth();
-
     const unsub = onAuthStateChanged(auth, async (authUser) => {
       setUser(authUser);
       if (authUser) {
