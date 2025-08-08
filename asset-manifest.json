@@ -1,15 +1,15 @@
 {
   "files": {
     "main.css": "/RuangSembangJIMS/static/css/main.c5b3c343.css",
-    "main.js": "/RuangSembangJIMS/static/js/main.0823950c.js",
+    "main.js": "/RuangSembangJIMS/static/js/main.b8cfb410.js",
     "static/js/453.873c516c.chunk.js": "/RuangSembangJIMS/static/js/453.873c516c.chunk.js",
     "index.html": "/RuangSembangJIMS/index.html",
     "main.c5b3c343.css.map": "/RuangSembangJIMS/static/css/main.c5b3c343.css.map",
-    "main.0823950c.js.map": "/RuangSembangJIMS/static/js/main.0823950c.js.map",
+    "main.b8cfb410.js.map": "/RuangSembangJIMS/static/js/main.b8cfb410.js.map",
     "453.873c516c.chunk.js.map": "/RuangSembangJIMS/static/js/453.873c516c.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.c5b3c343.css",
-    "static/js/main.0823950c.js"
+    "static/js/main.b8cfb410.js"
   ]
 }
