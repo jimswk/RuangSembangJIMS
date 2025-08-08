@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 // Pastikan anda menggantikan nilai di bawah dengan URL dan kunci projek Supabase anda
-const supabaseUrl = 'https://<your-project-id>.supabase.co';
-const supabaseAnonKey = '<your-anon-key>';
+const supabaseUrl = 'https://dboxazfwgecvarghssty.supabase.co';
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRib3hhemZ3Z2VjdmFyZ2hzc3R5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ2MzUzNDIsImV4cCI6MjA3MDIxMTM0Mn0.KJdFxShrWwV4Vqgf4In9DXLKJWUmHYOrw-X5C8O-YGE';
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
