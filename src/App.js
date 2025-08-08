@@ -26,8 +26,8 @@ import {
   orderBy
 } from 'firebase/firestore';
 
-// Gunakan konfigurasi Firebase yang disediakan oleh pengguna
-const firebaseConfig = {
+// Menggunakan konfigurasi Firebase yang disediakan oleh pengguna, atau fallback untuk binaan luar
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyA_OzSlTUylaTIHn44br1QeOfFzXN7Wx9E",
   authDomain: "ruangsembangjims.firebaseapp.com",
   projectId: "ruangsembangjims",
@@ -36,7 +36,6 @@ const firebaseConfig = {
   appId: "1:691618255078:web:017c9188daa37626a62b27",
   measurementId: "G-55XLKBYFYB"
 };
-// Semak sama ada pembolehubah global wujud sebelum menggunakannya
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
 // Inisialisasi Firebase
@@ -632,7 +631,7 @@ const App = () => {
   );
 
   const ReactionPicker = ({ msg, onReact, onClose }) => {
-    const emojis = ['🤣', '🤪', '🤫', '�', '👎', '👏', '🙏', '💖', '👍'];
+    const emojis = ['🤣', '�', '🤫', '🙈', '👎', '👏', '🙏', '💖', '👍'];
     return (
       <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 p-2 bg-white dark:bg-gray-700 rounded-full shadow-lg flex space-x-2">
         {emojis.map(emoji => (
