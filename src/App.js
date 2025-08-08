@@ -7,8 +7,6 @@ import {
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
   signOut,
-  signInWithCustomToken,
-  signInAnonymously,
 } from 'firebase/auth';
 import {
   getFirestore,
