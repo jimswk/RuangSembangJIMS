@@ -252,12 +252,12 @@ const App = () => {
     setMessageToDelete(msg);
     setShowDeleteConfirm(true);
   };
-  
+
   const confirmDelete = async () => {
     if (messageToDelete && user) {
       try {
         if (activeTab === 'channels' && selectedChannel) {
-           await deleteDoc(doc(db, 'channels', selectedChannel.id, 'messages', messageToDelete.id));
+          await deleteDoc(doc(db, 'channels', selectedChannel.id, 'messages', messageToDelete.id));
         } else if (activeTab === 'dms' && selectedDMUser) {
           const chatId = [user.uid, selectedDMUser.id].sort().join('_');
           await deleteDoc(doc(db, 'privateChats', chatId, 'messages', messageToDelete.id));
@@ -284,23 +284,23 @@ const App = () => {
     const messageRef = activeTab === 'channels' && selectedChannel
       ? doc(db, 'channels', selectedChannel.id, 'messages', msg.id)
       : doc(db, 'privateChats', [user.uid, selectedDMUser.id].sort().join('_'), 'messages', msg.id);
-    
+
     if (!messageRef) return;
     const isStarred = msg.starredBy?.includes(user.uid);
-    let newStarredBy = isStarred 
+    let newStarredBy = isStarred
       ? msg.starredBy.filter(id => id !== user.uid)
       : [...(msg.starredBy || []), user.uid];
 
     await updateDoc(messageRef, {
       starredBy: newStarredBy
     });
-  }
+  };
 
   // Fungsi chat
   const sendMessage = async (e) => {
     e.preventDefault();
     if (!input.trim() || (!selectedChannel && !selectedDMUser) || !user) return;
-    
+
     let messageCollectionRef;
 
     const messageData = {
@@ -337,7 +337,7 @@ const App = () => {
         } else {
           await addDoc(messageCollectionRef, messageData);
         }
-        
+
         setInput('');
         setReplyingTo(null);
       }
@@ -352,8 +352,22 @@ const App = () => {
     const channelName = e.target.channelName.value;
     const channelDesc = e.target.channelDesc.value;
 
-    if (!channelName.trim()) {
-      showNotification('Nama saluran tidak boleh kosong.');
+    // Log input values and user state for debugging
+    console.log('Creating channel with:', {
+      channelName,
+      channelDesc,
+      creatorId: user.uid,
+      isAdmin,
+      userEmail: user.email
+    });
+
+    // Validate inputs and admin status
+    if (!isAdmin) {
+      showNotification('Hanya admin boleh mencipta saluran.');
+      return;
+    }
+    if (!channelName.trim() || !channelDesc.trim()) {
+      showNotification('Nama saluran dan deskripsi tidak boleh kosong.');
       return;
     }
 
@@ -373,7 +387,8 @@ const App = () => {
       showNotification('Saluran baru berjaya dicipta.');
       setShowChannelModal(false);
     } catch (error) {
-      showNotification(`Ralat: ${error.message}`);
+      console.error('Error creating channel:', error.code, error.message);
+      showNotification(`Ralat: ${error.code} - ${error.message}`);
     }
   };
 
@@ -381,7 +396,7 @@ const App = () => {
     setModalMessage(msg);
     setShowModal(true);
   };
-  
+
   const handleThemeChange = (newTheme) => {
     setTheme(newTheme);
     localStorage.setItem('theme', newTheme);
@@ -402,7 +417,7 @@ const App = () => {
     setSelectedDMUser(dmUser);
     setSelectedChannel(null);
   };
-  
+
   const handleSelectChannel = (channel) => {
     setActiveTab('channels');
     setSelectedChannel(channel);
@@ -412,7 +427,7 @@ const App = () => {
   const handleForwardMessage = (msg) => {
     setMessageToForward(msg);
     setShowForwardModal(true);
-  }
+  };
 
   const performForward = async (targetId, type) => {
     if (!messageToForward || !user) return;
@@ -456,7 +471,7 @@ const App = () => {
     setEditingMessage(msg);
     setInput(msg.text);
     setReplyingTo(null);
-  }
+  };
 
   const handleReact = async (msg, emoji) => {
     const messageRef = activeTab === 'channels' && selectedChannel
@@ -526,7 +541,7 @@ const App = () => {
       </div>
     </Modal>
   );
-  
+
   const DeleteConfirmModal = () => (
     <Modal onClose={() => setShowDeleteConfirm(false)}>
       <div className="text-center">
@@ -557,7 +572,7 @@ const App = () => {
     <Modal onClose={() => setShowForwardModal(false)}>
       <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4 text-center">Majukan Mesej</h3>
       <p className="text-gray-600 dark:text-gray-300 mb-4">Pilih saluran atau pengguna untuk memajukan mesej ini:</p>
-      
+
       <div className="space-y-2">
         <h4 className="font-semibold">Saluran</h4>
         {channels.map(channel => (
@@ -638,16 +653,16 @@ const App = () => {
           <p className="text-sm mt-1 text-gray-500 dark:text-gray-400">Selamat datang, {user?.email?.split('@')[0] || `Pengguna ${user?.uid?.substring(0, 8)}`} ({isAdmin ? 'Admin' : 'Pengguna Biasa'})</p>
           <p className="text-xs mt-1 text-gray-400 dark:text-gray-500 truncate">UserID: {user?.uid}</p>
         </div>
-        
+
         {/* Tab untuk Saluran dan Mesej Peribadi */}
         <div className="flex justify-around p-2 border-b border-gray-200 dark:border-gray-700">
-          <button 
+          <button
             onClick={() => handleSelectChannel(null)}
             className={`flex-1 p-2 font-semibold text-center rounded-xl transition-colors ${activeTab === 'channels' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
           >
             Saluran
           </button>
-          <button 
+          <button
             onClick={() => handleSelectDMUser(null)}
             className={`flex-1 p-2 font-semibold text-center rounded-xl transition-colors ${activeTab === 'dms' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
           >
@@ -728,7 +743,7 @@ const App = () => {
                 </div>
               )}
             </div>
-            
+
             {/* Ruang mesej */}
             <div ref={chatWindowRef} className="flex-1 overflow-y-auto p-4 space-y-4" style={{ fontSize: `${fontSize}px` }}>
               {messages.map((msg) => (
@@ -875,13 +890,13 @@ const App = () => {
           </div>
         </Modal>
       )}
-      
+
       {/* Modal pengesahan padam mesej */}
       {showDeleteConfirm && <DeleteConfirmModal />}
 
       {/* Modal untuk memajukan mesej */}
       {showForwardModal && <ForwardModal />}
-      
+
       {/* Modal maklumat mesej */}
       {showMessageInfoModal && <MessageInfoModal />}
     </div>
@@ -900,11 +915,11 @@ const App = () => {
       setShowContextMenu(true);
       setShowReactionPicker(false); // Sembunyikan picker jika menu dibuka
     };
-    
+
     const toggleReactionPicker = (e) => {
       e.stopPropagation();
       setShowReactionPicker(!showReactionPicker);
-    }
+    };
 
     const handleCopy = () => {
       // document.execCommand('copy') is used for compatibility
