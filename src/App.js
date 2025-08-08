@@ -22,14 +22,23 @@ import {
   deleteDoc,
   getDoc,
   setDoc,
+  where,
+  orderBy
 } from 'firebase/firestore';
 
-// IMPORTANT: Use the global variables for Firebase configuration and authentication
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+// Gunakan konfigurasi Firebase yang disediakan oleh pengguna
+const firebaseConfig = {
+  apiKey: "AIzaSyA_OzSlTUylaTIHn44br1QeOfFzXN7Wx9E",
+  authDomain: "ruangsembangjims.firebaseapp.com",
+  projectId: "ruangsembangjims",
+  storageBucket: "ruangsembangjims.firebasestorage.app",
+  messagingSenderId: "691618255078",
+  appId: "1:691618255078:web:017c9188daa37626a62b27",
+  measurementId: "G-55XLKBYFYB"
+};
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-// Initialize Firebase
+// Inisialisasi Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -71,18 +80,27 @@ const App = () => {
   const [input, setInput] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [users, setUsers] = useState([]); // List of all users for DM
+  const [pinnedMessages, setPinnedMessages] = useState([]);
 
   // State untuk UI
   const [theme, setTheme] = useState('light');
   const [fontSize, setFontSize] = useState(16);
+  const [activeTab, setActiveTab] = useState('channels'); // 'channels' or 'dms'
+  const [selectedDMUser, setSelectedDMUser] = useState(null);
 
   // State untuk fitur chat
   const [replyingTo, setReplyingTo] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [showChannelModal, setShowChannelModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [messageToDelete, setMessageToDelete] = useState(null);
+  const [showForwardModal, setShowForwardModal] = useState(false);
+  const [messageToForward, setMessageToForward] = useState(null);
+  const [messageInfo, setMessageInfo] = useState(null);
+  const [showMessageInfoModal, setShowMessageInfoModal] = useState(false);
 
   // Ref untuk auto-scroll dan mengesan mesej baru
   const chatWindowRef = useRef(null);
@@ -106,8 +124,7 @@ const App = () => {
     const unsub = onAuthStateChanged(auth, async (authUser) => {
       setUser(authUser);
       if (authUser) {
-        setIsAdmin(authUser.email?.endsWith('@imi.gov.my') || false); // Handle anonymous users
-        // Simpan UID dan peran di Firestore saat login
+        setIsAdmin(authUser.email?.endsWith('@imi.gov.my') || false);
         const userRef = doc(db, 'users', authUser.uid);
         const docSnap = await getDoc(userRef);
         if (!docSnap.exists()) {
@@ -125,6 +142,17 @@ const App = () => {
     return unsub;
   }, []);
 
+  // Listener untuk semua pengguna (untuk DM)
+  useEffect(() => {
+    if (isAuthReady && user) {
+      const q = query(collection(db, 'users'));
+      const unsub = onSnapshot(q, (snapshot) => {
+        setUsers(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+      });
+      return unsub;
+    }
+  }, [isAuthReady, user]);
+
   // Listener untuk saluran (channels)
   useEffect(() => {
     if (isAuthReady && user) {
@@ -136,33 +164,43 @@ const App = () => {
     }
   }, [isAuthReady, user]);
 
-  // Listener untuk mesej dalam saluran yang dipilih
+  // Listener untuk mesej dalam saluran yang dipilih atau DM
   useEffect(() => {
-    if (selectedChannel && isAuthReady && user) {
-      const messagesRef = collection(db, 'channels', selectedChannel.id, 'messages');
-      const q = query(messagesRef);
-      const unsub = onSnapshot(q, (snapshot) => {
-        setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      });
+    if (user && isAuthReady) {
+      let unsub;
+      if (activeTab === 'channels' && selectedChannel) {
+        const messagesRef = collection(db, 'channels', selectedChannel.id, 'messages');
+        const q = query(messagesRef, orderBy('timestamp'));
+        unsub = onSnapshot(q, (snapshot) => {
+          setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        });
+      } else if (activeTab === 'dms' && selectedDMUser) {
+        const chatId = [user.uid, selectedDMUser.id].sort().join('_');
+        const dmRef = collection(db, 'privateChats', chatId, 'messages');
+        const q = query(dmRef, orderBy('timestamp'));
+        unsub = onSnapshot(q, (snapshot) => {
+          setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        });
+      } else {
+        setMessages([]);
+      }
       return unsub;
-    } else {
-      setMessages([]);
     }
-  }, [selectedChannel, isAuthReady, user]);
+  }, [selectedChannel, selectedDMUser, activeTab, isAuthReady, user]);
 
   // Efek untuk notifikasi mesej baru dan auto-scroll
   useEffect(() => {
     if (messages.length > prevMessageCount.current && chatWindowRef.current) {
-        const lastMessage = messages[messages.length - 1];
-        if (lastMessage.senderId !== user?.uid) {
-            showNotification(`Mesej baru dari ${lastMessage.senderName} di ${selectedChannel?.name}`);
-        }
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.senderId !== user?.uid) {
+        showNotification(`Mesej baru dari ${lastMessage.senderName} di ${selectedChannel?.name || selectedDMUser?.displayName}`);
+      }
     }
     if (chatWindowRef.current) {
       chatWindowRef.current.scrollTop = chatWindowRef.current.scrollHeight;
     }
     prevMessageCount.current = messages.length;
-  }, [messages, selectedChannel, user]);
+  }, [messages, selectedChannel, selectedDMUser, user]);
 
   // Efek untuk tema dan saiz teks
   useEffect(() => {
@@ -172,6 +210,20 @@ const App = () => {
     setFontSize(parseInt(storedFontSize));
     document.documentElement.className = storedTheme;
   }, []);
+
+  // Listener untuk mesej yang dipin
+  useEffect(() => {
+    if (selectedChannel && user) {
+      const messagesRef = collection(db, 'channels', selectedChannel.id, 'messages');
+      const q = query(messagesRef, where('pinned', '==', true));
+      const unsub = onSnapshot(q, (snapshot) => {
+        setPinnedMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+      return unsub;
+    } else {
+      setPinnedMessages([]);
+    }
+  }, [selectedChannel, user]);
 
   // Fungsi autentikasi
   const handleAuth = async (e) => {
@@ -209,20 +261,26 @@ const App = () => {
       await signOut(auth);
       showNotification('Anda telah log keluar.');
       setSelectedChannel(null);
+      setSelectedDMUser(null);
     } catch (error) {
       showNotification(`Ralat: ${error.message}`);
     }
   };
-  
+
   const handleDeleteMessage = (msg) => {
     setMessageToDelete(msg);
     setShowDeleteConfirm(true);
   };
   
   const confirmDelete = async () => {
-    if (messageToDelete && selectedChannel) {
+    if (messageToDelete && user) {
       try {
-        await deleteDoc(doc(db, 'channels', selectedChannel.id, 'messages', messageToDelete.id));
+        if (activeTab === 'channels' && selectedChannel) {
+           await deleteDoc(doc(db, 'channels', selectedChannel.id, 'messages', messageToDelete.id));
+        } else if (activeTab === 'dms' && selectedDMUser) {
+          const chatId = [user.uid, selectedDMUser.id].sort().join('_');
+          await deleteDoc(doc(db, 'privateChats', chatId, 'messages', messageToDelete.id));
+        }
         showNotification('Mesej telah dipadam.');
       } catch (error) {
         showNotification(`Ralat memadam mesej: ${error.message}`);
@@ -232,26 +290,79 @@ const App = () => {
     }
   };
 
+  const handlePinMessage = async (msg) => {
+    if (activeTab !== 'channels') {
+      showNotification('Pin hanya tersedia di saluran.');
+      return;
+    }
+    const messageRef = doc(db, 'channels', selectedChannel.id, 'messages', msg.id);
+    await updateDoc(messageRef, { pinned: !msg.pinned });
+  };
+
+  const handleStarMessage = async (msg) => {
+    const messageRef = activeTab === 'channels' && selectedChannel
+      ? doc(db, 'channels', selectedChannel.id, 'messages', msg.id)
+      : doc(db, 'privateChats', [user.uid, selectedDMUser.id].sort().join('_'), 'messages', msg.id);
+    
+    if (!messageRef) return;
+    const isStarred = msg.starredBy?.includes(user.uid);
+    let newStarredBy = isStarred 
+      ? msg.starredBy.filter(id => id !== user.uid)
+      : [...(msg.starredBy || []), user.uid];
+
+    await updateDoc(messageRef, {
+      starredBy: newStarredBy
+    });
+  }
+
   // Fungsi chat
   const sendMessage = async (e) => {
     e.preventDefault();
-    if (!input.trim() || !selectedChannel || !user) return;
+    if (!input.trim() || (!selectedChannel && !selectedDMUser) || !user) return;
+    
+    let messageCollectionRef;
 
-    await addDoc(collection(db, 'channels', selectedChannel.id, 'messages'), {
+    const messageData = {
       senderId: user.uid,
       senderName: user.email?.split('@')[0] || `Pengguna ${user.uid.substring(0, 8)}`,
       text: input,
+      imageUrl: null, // Image functionality removed
       timestamp: serverTimestamp(),
       repliedTo: replyingTo ? {
         id: replyingTo.id,
         senderName: replyingTo.senderName,
         text: replyingTo.text
       } : null,
-      reactions: {}
-    });
+      reactions: {},
+      starredBy: [],
+      edited: false
+    };
 
-    setInput('');
-    setReplyingTo(null);
+    try {
+      if (activeTab === 'channels' && selectedChannel) {
+        messageCollectionRef = collection(db, 'channels', selectedChannel.id, 'messages');
+      } else if (activeTab === 'dms' && selectedDMUser) {
+        const chatId = [user.uid, selectedDMUser.id].sort().join('_');
+        messageCollectionRef = collection(db, 'privateChats', chatId, 'messages');
+      }
+
+      if (messageCollectionRef) {
+        if (editingMessage) {
+          await updateDoc(doc(messageCollectionRef, editingMessage.id), {
+            text: input,
+            edited: true,
+          });
+          setEditingMessage(null);
+        } else {
+          await addDoc(messageCollectionRef, messageData);
+        }
+        
+        setInput('');
+        setReplyingTo(null);
+      }
+    } catch (error) {
+      showNotification(`Ralat menghantar mesej: ${error.message}`);
+    }
   };
 
   // Fungsi membuat saluran (hanya untuk admin)
@@ -272,7 +383,6 @@ const App = () => {
         creatorId: user.uid,
         createdAt: serverTimestamp()
       });
-      // Tambah mesej notifikasi pertama dalam saluran baru
       await addDoc(collection(db, 'channels', docRef.id, 'messages'), {
         senderId: 'system',
         senderName: 'Sistem',
@@ -300,6 +410,81 @@ const App = () => {
   const handleFontSizeChange = (newSize) => {
     setFontSize(newSize);
     localStorage.setItem('fontSize', newSize);
+  };
+
+  const handleSelectDMUser = (dmUser) => {
+    if (dmUser.id === user.uid) {
+      showNotification('Anda tidak boleh menghantar DM kepada diri sendiri.');
+      return;
+    }
+    setActiveTab('dms');
+    setSelectedDMUser(dmUser);
+    setSelectedChannel(null);
+  };
+  
+  const handleSelectChannel = (channel) => {
+    setActiveTab('channels');
+    setSelectedChannel(channel);
+    setSelectedDMUser(null);
+  };
+
+  const handleForwardMessage = (msg) => {
+    setMessageToForward(msg);
+    setShowForwardModal(true);
+  }
+
+  const performForward = async (targetId, type) => {
+    if (!messageToForward || !user) return;
+
+    const messageData = {
+      senderId: user.uid,
+      senderName: user.email?.split('@')[0] || `Pengguna ${user.uid.substring(0, 8)}`,
+      text: messageToForward.text,
+      imageUrl: null, // Image functionality removed
+      timestamp: serverTimestamp(),
+      repliedTo: null,
+      reactions: {},
+      starredBy: [],
+      edited: false
+    };
+
+    try {
+      if (type === 'channel') {
+        const messageRef = collection(db, 'channels', targetId, 'messages');
+        await addDoc(messageRef, {
+          ...messageData,
+          text: `(Maju dari ${messageToForward.senderName}): ${messageToForward.text}`
+        });
+      } else if (type === 'dm') {
+        const chatId = [user.uid, targetId].sort().join('_');
+        const messageRef = collection(db, 'privateChats', chatId, 'messages');
+        await addDoc(messageRef, {
+          ...messageData,
+          text: `(Maju dari ${messageToForward.senderName}): ${messageToForward.text}`
+        });
+      }
+      showNotification('Mesej berjaya dimajukan!');
+      setShowForwardModal(false);
+      setMessageToForward(null);
+    } catch (error) {
+      showNotification(`Ralat memajukan mesej: ${error.message}`);
+    }
+  };
+
+  const handleEditMessage = (msg) => {
+    setEditingMessage(msg);
+    setInput(msg.text);
+    setReplyingTo(null);
+  }
+
+  const handleReact = async (msg, emoji) => {
+    const messageRef = activeTab === 'channels' && selectedChannel
+      ? doc(db, 'channels', selectedChannel.id, 'messages', msg.id)
+      : doc(db, 'privateChats', [user.uid, selectedDMUser.id].sort().join('_'), 'messages', msg.id);
+    const currentReactions = msg.reactions || {};
+    const newReactions = { ...currentReactions };
+    newReactions[emoji] = (newReactions[emoji] || 0) + 1;
+    await updateDoc(messageRef, { reactions: newReactions });
   };
 
   // Komponen untuk paparan autentikasi
@@ -387,29 +572,137 @@ const App = () => {
     </Modal>
   );
 
+  const ForwardModal = () => (
+    <Modal onClose={() => setShowForwardModal(false)}>
+      <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4 text-center">Majukan Mesej</h3>
+      <p className="text-gray-600 dark:text-gray-300 mb-4">Pilih saluran atau pengguna untuk memajukan mesej ini:</p>
+      
+      <div className="space-y-2">
+        <h4 className="font-semibold">Saluran</h4>
+        {channels.map(channel => (
+          <button
+            key={channel.id}
+            onClick={() => performForward(channel.id, 'channel')}
+            className="w-full text-left p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700"
+          >
+            # {channel.name}
+          </button>
+        ))}
+
+        <h4 className="font-semibold mt-4">Pengguna</h4>
+        {users.filter(u => u.id !== user.uid).map(dmUser => (
+          <button
+            key={dmUser.id}
+            onClick={() => performForward(dmUser.id, 'dm')}
+            className="w-full text-left p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700"
+          >
+            {dmUser.displayName}
+          </button>
+        ))}
+      </div>
+    </Modal>
+  );
+
+  const MessageInfoModal = () => (
+    <Modal onClose={() => setShowMessageInfoModal(false)}>
+      <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4 text-center">Maklumat Mesej</h3>
+      {messageInfo && (
+        <div className="space-y-2 text-gray-700 dark:text-gray-300">
+          <p><strong>ID Mesej:</strong> {messageInfo.id}</p>
+          <p><strong>Pengirim:</strong> {messageInfo.senderName}</p>
+          <p><strong>Waktu:</strong> {messageInfo.timestamp?.toDate().toLocaleString()}</p>
+          {messageInfo.edited && <p className="text-sm text-blue-500">Mesej ini telah disunting.</p>}
+          {messageInfo.repliedTo && (
+            <p><strong>Balas kepada:</strong> {messageInfo.repliedTo.senderName}</p>
+          )}
+          {Object.keys(messageInfo.reactions || {}).length > 0 && (
+            <div>
+              <strong>Reaksi:</strong>
+              <div className="flex space-x-2 mt-1">
+                {Object.entries(messageInfo.reactions).map(([emoji, count]) => (
+                  <span key={emoji} className="bg-gray-200 dark:bg-gray-700 rounded-full px-2 py-1 text-sm">{emoji} {count}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+
+  const ReactionPicker = ({ msg, onReact, onClose }) => {
+    const emojis = ['�', '🤪', '🤫', '🙈', '👎', '👏', '🙏', '💖', '👍'];
+    return (
+      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 p-2 bg-white dark:bg-gray-700 rounded-full shadow-lg flex space-x-2">
+        {emojis.map(emoji => (
+          <button
+            key={emoji}
+            onClick={() => { onReact(msg, emoji); onClose(); }}
+            className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
   // Komponen paparan utama
   const ChatAppUI = () => (
     <div className="flex h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-inter">
-      {/* Sidebar untuk Senarai Saluran */}
+      {/* Sidebar untuk Senarai Saluran dan DM */}
       <div className="flex flex-col w-1/4 min-w-[250px] bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700">
         <div className="p-4 border-b border-gray-200 dark:border-gray-700">
           <h1 className="text-2xl font-bold text-blue-600">JIMS Chat</h1>
           <p className="text-sm mt-1 text-gray-500 dark:text-gray-400">Selamat datang, {user?.email?.split('@')[0] || `Pengguna ${user?.uid?.substring(0, 8)}`} ({isAdmin ? 'Admin' : 'Pengguna Biasa'})</p>
           <p className="text-xs mt-1 text-gray-400 dark:text-gray-500 truncate">UserID: {user?.uid}</p>
         </div>
+        
+        {/* Tab untuk Saluran dan Mesej Peribadi */}
+        <div className="flex justify-around p-2 border-b border-gray-200 dark:border-gray-700">
+          <button 
+            onClick={() => handleSelectChannel(null)}
+            className={`flex-1 p-2 font-semibold text-center rounded-xl transition-colors ${activeTab === 'channels' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
+          >
+            Saluran
+          </button>
+          <button 
+            onClick={() => handleSelectDMUser(null)}
+            className={`flex-1 p-2 font-semibold text-center rounded-xl transition-colors ${activeTab === 'dms' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
+          >
+            Mesej Peribadi
+          </button>
+        </div>
+
         <div className="flex-1 overflow-y-auto">
-          {channels.map((channel) => (
-            <div
-              key={channel.id}
-              onClick={() => setSelectedChannel(channel)}
-              className={`p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
-                selectedChannel?.id === channel.id ? 'bg-blue-100 dark:bg-blue-900 border-l-4 border-blue-600' : ''
-              }`}
-            >
-              <h3 className="text-lg font-semibold">{channel.name}</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{channel.description}</p>
-            </div>
-          ))}
+          {activeTab === 'channels' && (
+            channels.map((channel) => (
+              <div
+                key={channel.id}
+                onClick={() => handleSelectChannel(channel)}
+                className={`p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
+                  selectedChannel?.id === channel.id ? 'bg-blue-100 dark:bg-blue-900 border-l-4 border-blue-600' : ''
+                }`}
+              >
+                <h3 className="text-lg font-semibold">{channel.name}</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{channel.description}</p>
+              </div>
+            ))
+          )}
+          {activeTab === 'dms' && (
+            users.filter(u => u.id !== user.uid).map((dmUser) => (
+              <div
+                key={dmUser.id}
+                onClick={() => handleSelectDMUser(dmUser)}
+                className={`p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
+                  selectedDMUser?.id === dmUser.id ? 'bg-blue-100 dark:bg-blue-900 border-l-4 border-blue-600' : ''
+                }`}
+              >
+                <h3 className="text-lg font-semibold">{dmUser.displayName}</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{dmUser.email}</p>
+              </div>
+            ))
+          )}
         </div>
         <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex flex-col space-y-2">
           {isAdmin && (
@@ -440,12 +733,19 @@ const App = () => {
 
       {/* Kawasan perbualan utama */}
       <div className="flex-1 flex flex-col">
-        {selectedChannel ? (
+        {selectedChannel || selectedDMUser ? (
           <>
             {/* Header chat */}
             <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4">
-              <h2 className="text-xl font-bold">{selectedChannel.name}</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">{selectedChannel.description}</p>
+              <h2 className="text-xl font-bold">{selectedChannel?.name || selectedDMUser?.displayName}</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{selectedChannel?.description || selectedDMUser?.email}</p>
+              {activeTab === 'channels' && pinnedMessages.length > 0 && (
+                <div className="mt-2 p-2 bg-yellow-100 dark:bg-yellow-800 rounded-xl flex items-center space-x-2 text-sm text-gray-800 dark:text-gray-200">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L10 12L2 14L12 16L14 24L16 14L24 12L14 10L12 2Z"/></svg>
+                  <span className="font-semibold">Mesej yang Dipin:</span>
+                  <span className="truncate">{pinnedMessages[0].text}</span>
+                </div>
+              )}
             </div>
             
             {/* Ruang mesej */}
@@ -457,13 +757,15 @@ const App = () => {
                   user={user}
                   onReply={setReplyingTo}
                   onDelete={() => handleDeleteMessage(msg)}
-                  onReact={async (emoji) => {
-                    const messageRef = doc(db, 'channels', selectedChannel.id, 'messages', msg.id);
-                    const currentReactions = msg.reactions || {};
-                    const newReactions = { ...currentReactions };
-                    newReactions[emoji] = (newReactions[emoji] || 0) + 1;
-                    await updateDoc(messageRef, { reactions: newReactions });
-                  }}
+                  onEdit={() => handleEditMessage(msg)}
+                  onForward={() => handleForwardMessage(msg)}
+                  onInfo={() => { setMessageInfo(msg); setShowMessageInfoModal(true); }}
+                  onPin={() => handlePinMessage(msg)}
+                  onStar={() => handleStarMessage(msg)}
+                  onReact={handleReact}
+                  activeTab={activeTab}
+                  selectedChannel={selectedChannel}
+                  selectedDMUser={selectedDMUser}
                 />
               ))}
             </div>
@@ -482,7 +784,18 @@ const App = () => {
                   </button>
                 </div>
               )}
-              <form onSubmit={sendMessage} className="flex space-x-2">
+              {editingMessage && (
+                <div className="bg-blue-200 dark:bg-blue-700 p-2 rounded-t-xl mb-2 relative">
+                  <p className="text-sm font-semibold text-white">Menyunting mesej...</p>
+                  <button
+                    onClick={() => { setEditingMessage(null); setInput(''); }}
+                    className="absolute top-1 right-1 text-white hover:text-red-200"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                  </button>
+                </div>
+              )}
+              <form onSubmit={sendMessage} className="flex space-x-2 items-center">
                 <input
                   type="text"
                   value={input}
@@ -493,9 +806,13 @@ const App = () => {
                 />
                 <button
                   type="submit"
-                  className="bg-blue-600 text-white p-3 rounded-xl shadow-lg hover:bg-blue-700 transition-colors"
+                  className={`bg-blue-600 text-white p-3 rounded-xl shadow-lg transition-colors ${editingMessage ? 'hover:bg-green-700' : 'hover:bg-blue-700'}`}
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                  {editingMessage ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5.34"/><polygon points="18 2 22 6 12 16 8 16 8 12 18 2"/></svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                  )}
                 </button>
               </form>
             </div>
@@ -503,8 +820,8 @@ const App = () => {
         ) : (
           <div className="flex-1 flex items-center justify-center text-center text-gray-500 dark:text-gray-400">
             <div>
-              <p className="text-xl font-bold mb-2">Pilih saluran untuk mula bersembang.</p>
-              <p className="text-md">Gunakan panel di sebelah kiri untuk memilih saluran atau mencipta yang baru.</p>
+              <p className="text-xl font-bold mb-2">Pilih saluran atau pengguna untuk mula bersembang.</p>
+              <p className="text-md">Gunakan panel di sebelah kiri untuk memilih saluran atau pengguna.</p>
             </div>
           </div>
         )}
@@ -580,18 +897,43 @@ const App = () => {
       
       {/* Modal pengesahan padam mesej */}
       {showDeleteConfirm && <DeleteConfirmModal />}
+
+      {/* Modal untuk memajukan mesej */}
+      {showForwardModal && <ForwardModal />}
+      
+      {/* Modal maklumat mesej */}
+      {showMessageInfoModal && <MessageInfoModal />}
     </div>
   );
 
   // Komponen bubble mesej
-  const MessageBubble = ({ msg, user, onReply, onDelete, onReact }) => {
+  const MessageBubble = ({ msg, user, onReply, onDelete, onEdit, onForward, onInfo, onPin, onStar, onReact, activeTab, selectedChannel, selectedDMUser }) => {
     const isSender = msg.senderId === user?.uid;
     const [showContextMenu, setShowContextMenu] = useState(false);
     const contextMenuRef = useRef(null);
+    const isStarred = msg.starredBy?.includes(user?.uid);
+    const [showReactionPicker, setShowReactionPicker] = useState(false);
+    const reactionPickerRef = useRef(null);
 
     const handleContextMenu = (e) => {
       e.preventDefault();
       setShowContextMenu(true);
+      setShowReactionPicker(false); // Sembunyikan picker jika menu dibuka
+    };
+    
+    const toggleReactionPicker = (e) => {
+      e.stopPropagation();
+      setShowReactionPicker(!showReactionPicker);
+    }
+
+    const handleCopy = () => {
+      navigator.clipboard.writeText(msg.text).then(() => {
+        showNotification('Mesej disalin ke papan keratan!');
+      }).catch(err => {
+        console.error('Gagal menyalin: ', err);
+        showNotification('Gagal menyalin mesej.');
+      });
+      setShowContextMenu(false);
     };
 
     useEffect(() => {
@@ -599,18 +941,20 @@ const App = () => {
         if (contextMenuRef.current && !contextMenuRef.current.contains(event.target)) {
           setShowContextMenu(false);
         }
+        if (reactionPickerRef.current && !reactionPickerRef.current.contains(event.target)) {
+          setShowReactionPicker(false);
+        }
       };
       document.addEventListener("mousedown", handleClickOutside);
       return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, [contextMenuRef]);
+    }, [contextMenuRef, reactionPickerRef]);
 
     return (
       <div
         className={`flex ${isSender ? 'justify-end' : 'justify-start'}`}
         onContextMenu={handleContextMenu}
-        onDoubleClick={() => onReact('👍')}
+        onDoubleClick={() => onReact(msg, '👍')}
         onTouchStart={(e) => {
-          // Touch long press detection
           const timer = setTimeout(() => handleContextMenu(e), 500);
           e.currentTarget.addEventListener('touchend', () => clearTimeout(timer), { once: true });
         }}
@@ -631,7 +975,12 @@ const App = () => {
               </p>
             )}
             <p>{msg.text}</p>
-            <p className="text-right text-xs text-opacity-80 mt-1">{msg.timestamp?.toDate().toLocaleTimeString()}</p>
+            <div className="flex justify-end items-center text-xs text-opacity-80 mt-1">
+              {msg.edited && <span className="italic mr-2 text-gray-300 dark:text-gray-500">(disunting)</span>}
+              {isStarred && <span className="mr-1 text-yellow-400">★</span>}
+              {msg.pinned && <span className="mr-1 text-red-500">📌</span>}
+              <span>{msg.timestamp?.toDate().toLocaleTimeString()}</span>
+            </div>
             {Object.keys(msg.reactions || {}).length > 0 && (
               <div className="absolute -bottom-3 right-0 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-full shadow-md text-xs">
                 {Object.entries(msg.reactions).map(([emoji, count]) => (
@@ -645,14 +994,22 @@ const App = () => {
             <div ref={contextMenuRef} className="absolute z-10 bg-white dark:bg-gray-700 rounded-xl shadow-lg mt-1 overflow-hidden">
               <ul className="text-sm text-gray-700 dark:text-gray-200">
                 <li onClick={() => { onReply(msg); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">Balas</li>
-                <li onClick={() => { /* copy logic */ setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">Salin</li>
-                <li onClick={() => { /* forward logic */ setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">Majukan</li>
-                <li onClick={() => { onReact('👍'); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">React 👍</li>
+                <li onClick={() => { handleCopy(); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">Salin</li>
+                <li onClick={() => { onForward(msg); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">Majukan</li>
+                <li onClick={() => { onInfo(); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">Info Mesej</li>
+                <li onClick={() => { onStar(msg); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">{isStarred ? 'Unstar' : 'Star'}</li>
+                <li onClick={toggleReactionPicker} className="relative px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">
+                  React
+                  {showReactionPicker && <ReactionPicker msg={msg} onReact={onReact} onClose={() => setShowReactionPicker(false)} />}
+                </li>
                 {isSender && (
                   <>
-                    <li onClick={() => { /* edit logic */ setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">Sunting</li>
+                    <li onClick={() => { onEdit(msg); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">Sunting</li>
                     <li onClick={() => { onDelete(msg); setShowContextMenu(false); }} className="px-4 py-2 text-red-500 hover:bg-red-100 dark:hover:bg-red-900 cursor-pointer">Padam</li>
                   </>
+                )}
+                {activeTab === 'channels' && isAdmin && (
+                  <li onClick={() => { onPin(msg); setShowContextMenu(false); }} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer">{msg.pinned ? 'Unpin' : 'Pin'}</li>
                 )}
               </ul>
             </div>
