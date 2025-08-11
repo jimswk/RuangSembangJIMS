@@ -10,8 +10,11 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <!-- Supabase JS SDK -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
 
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -33,13 +36,22 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    // 🔑 Gantikan dengan URL & Key dari Supabase Anda
-    const supabaseUrl = 'https://yrmxxburxopztabpodwk.supabase.co'; // GANTI INI
-    const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlybXh4YnVyeG9wenRhYnBvZHdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ4OTk5NDAsImV4cCI6MjA3MDQ3NTk0MH0.3W-oTgA1YOsiYHozu-F4YUf9BfIyUI_hOP46IDek_KY';       // GANTI INI
+    // Firebase Config
+    const firebaseConfig = {
+      apiKey: "AIzaSyA8L6_srjWF7mk-7k5UGk2vH_klYYOkU5U",
+      authDomain: "ruangsembangjimsv2.firebaseapp.com",
+      projectId: "ruangsembangjimsv2",
+      storageBucket: "ruangsembangjimsv2.firebasestorage.app",
+      messagingSenderId: "180755101546",
+      appId: "1:180755101546:web:5bd96908400e3f59689713",
+      measurementId: "G-76BVBVGYZ1"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+    const storage = firebase.storage();
 
-    const supabase = supabase.createClient(supabaseUrl, supabaseAnonKey);
-
-    const { useState, useEffect, useRef } = React;
+    const { useState, useEffect, useRef, useCallback } = React;
 
     // Popup Alert
     const PopupAlert = ({ message, type = "info", onClose }) => {
@@ -85,10 +97,16 @@
       const notificationSound = document.getElementById('notificationSound');
 
       useEffect(() => {
-        const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-          if (session?.user) {
-            const u = session.user;
-            await upsertUser(u);
+        const unsub = auth.onAuthStateChanged(async (u) => {
+          if (u) {
+            const userRef = db.collection('users').doc(u.uid);
+            await userRef.set({
+              uid: u.uid,
+              email: u.email,
+              online: true,
+              lastSeen: new Date(),
+              photoURL: u.photoURL
+            }, { merge: true });
             setUser(u);
             setIsAdmin(u.email?.endsWith('@imi.gov.my'));
           } else {
@@ -98,19 +116,8 @@
           setLoading(false);
         });
 
-        return () => authListener.subscription.unsubscribe();
+        return () => unsub();
       }, []);
-
-      const upsertUser = async (u) => {
-        const { error } = await supabase.from('users').upsert({
-          id: u.id,
-          email: u.email,
-          online: true,
-          last_seen: new Date(),
-          created_at: u.created_at
-        });
-        if (error) console.error("Error upsert user:", error);
-      };
 
       useEffect(() => {
         if (darkMode) document.documentElement.classList.add('dark');
@@ -128,10 +135,8 @@
       };
 
       const handleLogout = async () => {
-        if (user) {
-          await supabase.from('users').update({ online: false, last_seen: new Date() }).eq('id', user.id);
-        }
-        await supabase.auth.signOut();
+        await db.collection('users').doc(user.uid).update({ online: false, lastSeen: new Date() });
+        await auth.signOut();
         setUser(null);
         showAlert("Berjaya log keluar", "success");
       };
@@ -169,10 +174,12 @@
               onAction={(action) => {
                 const msg = contextMenu.message;
                 if (action === 'Padam') {
-                  supabase.from('messages').delete().eq('id', msg.id);
+                  db.collection('messages').doc(msg.id).delete();
                 } else if (action === 'Sematkan') {
                   setPinnedMessages(prev => [...prev, msg]);
                   showAlert("Mesej disematkan", "success");
+                } else if (action === 'Reaksi') {
+                  // Reaksi akan ditangani dalam chat bubble
                 }
                 setContextMenu({ show: false });
               }}
@@ -186,22 +193,22 @@
     const AuthScreen = ({ authStep, setAuthStep, showAlert }) => {
       const [email, setEmail] = useState('');
       const [password, setPassword] = useState('');
+      const [confirm, setConfirm] = useState('');
 
       const submit = async (e) => {
         e.preventDefault();
         try {
           if (authStep === 'login') {
-            const { error } = await supabase.auth.signInWithPassword({ email, password });
-            if (error) throw error;
+            await auth.signInWithEmailAndPassword(email, password);
             showAlert("Log masuk berjaya!", "success");
           } else if (authStep === 'register') {
-            const { error } = await supabase.auth.signUp({ email, password });
-            if (error) throw error;
-            showAlert("Pendaftaran berjaya! Semak emel untuk pengesahan.", "success");
+            if (password !== confirm) return showAlert("Kata laluan tidak sepadan");
+            const { user } = await auth.createUserWithEmailAndPassword(email, password);
+            await db.collection('users').doc(user.uid).set({ email, uid: user.uid, online: true, lastSeen: new Date() });
+            showAlert("Akaun berjaya didaftarkan!", "success");
           } else if (authStep === 'forgot') {
-            const { error } = await supabase.auth.resetPasswordForEmail(email);
-            if (error) throw error;
-            showAlert("Pautan set semula dihantar.", "success");
+            await auth.sendPasswordResetEmail(email);
+            showAlert("Pautan set semula dihantar ke emel.", "success");
             setAuthStep('login');
           }
         } catch (err) {
@@ -216,6 +223,7 @@
             <form onSubmit={submit}>
               <input type="email" placeholder="Emel" value={email} onChange={e => setEmail(e.target.value)} required className="w-full p-2 mb-4 border rounded dark:bg-gray-700" />
               {authStep !== 'forgot' && <input type="password" placeholder="Kata Laluan" value={password} onChange={e => setPassword(e.target.value)} required className="w-full p-2 mb-4 border rounded dark:bg-gray-700" />}
+              {authStep === 'register' && <input type="password" placeholder="Sahkan" value={confirm} onChange={e => setConfirm(e.target.value)} required className="w-full p-2 mb-4 border rounded dark:bg-gray-700" />}
               <button type="submit" className="w-full bg-blue-500 hover:bg-blue-600 text-white p-2 rounded">Hantar</button>
             </form>
             <div className="mt-4 text-center">
@@ -252,117 +260,118 @@
       const [selectedUsers, setSelectedUsers] = useState([]);
       const [typing, setTyping] = useState('');
       const messagesEndRef = useRef(null);
+      const typingTimeoutRef = useRef(null);
 
       const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 
-      // Load data awal
+      // Sync channels & users
       useEffect(() => {
-        fetchChannels();
-        fetchUsers();
+        const unsubCh = db.collection('channels').onSnapshot(s => {
+          setChannels(s.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
+        const unsubU = db.collection('users').onSnapshot(s => {
+          setOnlineUsers(s.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
+        return () => { unsubCh(); unsubU(); };
+      }, []);
 
-        const channel = supabase.channel('realtime data')
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
-            setMessages(msgs => [...msgs, payload.new]);
-            if (payload.new.sender_id !== user.id && activeChat?.id === payload.new.chat_id) playNotif();
+      // Sync messages
+      useEffect(() => {
+        if (!activeChat?.id) return;
+        const unsub = db.collection('messages')
+          .where('chatId', '==', activeChat.id)
+          .orderBy('timestamp', 'asc')
+          .onSnapshot(snap => {
+            const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            setMessages(msgs);
+            const newMsg = msgs.filter(m => m.timestamp?.seconds > (Date.now() / 1000) - 30 && m.senderId !== user.uid);
+            if (newMsg.length > 0) playNotif();
             scrollToBottom();
-          })
-          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users' }, payload => {
-            fetchUsers();
-          })
-          .subscribe();
+          });
 
-        return () => {
-          supabase.removeChannel(channel);
-        };
+        // Typing indicator
+        const typingRef = db.collection('typing').doc(activeChat.id);
+        const unsubTyping = typingRef.onSnapshot(s => {
+          const data = s.data();
+          if (data && data.userId !== user.uid) {
+            setTyping(data.email);
+            setTimeout(() => setTyping(''), 3000);
+          }
+        });
+
+        return () => { unsub(); unsubTyping(); };
       }, [activeChat]);
 
-      const fetchChannels = async () => {
-        const { data, error } = await supabase.from('channels').select('*');
-        if (error) console.error("Error fetching channels:", error);
-        else setChannels(data);
-      };
-
-      const fetchUsers = async () => {
-        const { data, error } = await supabase.from('users').select('*').eq('online', true);
-        if (error) console.error("Error fetching users:", error);
-        else setOnlineUsers(data.filter(u => u.id !== user.id));
-      };
-
-      useEffect(() => {
-        if (activeChat?.id) {
-          fetchMessages(activeChat.id);
-        }
-      }, [activeChat]);
-
-      const fetchMessages = async (chatId) => {
-        const { data, error } = await supabase
-          .from('messages')
-          .select('*, sender:sender_id(email)')
-          .eq('chat_id', chatId)
-          .order('created_at', { ascending: true });
-        if (error) console.error("Error fetching messages:", error);
-        else setMessages(data);
+      const sendTyping = () => {
+        if (!activeChat) return;
+        db.collection('typing').doc(activeChat.id).set({
+          userId: user.uid,
+          email: user.email,
+          timestamp: new Date()
+        });
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(() => {
+          db.collection('typing').doc(activeChat.id).delete();
+        }, 2000);
       };
 
       const sendMessage = async () => {
         if (!newMessage.trim() || !activeChat) return;
-        const { error } = await supabase.from('messages').insert([{
+        await db.collection('messages').add({
           text: newMessage,
-          sender_id: user.id,
-          chat_id: activeChat.id,
+          senderId: user.uid,
+          senderEmail: user.email,
+          chatId: activeChat.id,
+          timestamp: new Date(),
           type: activeChat.type
-        }]);
-        if (error) console.error("Send error:", error);
-        else setNewMessage('');
+        });
+        setNewMessage('');
       };
 
       const createChannel = async () => {
         if (!newChan) return;
-        const { error } = await supabase.from('channels').insert([{
+        await db.collection('channels').add({
           name: newChan,
           description: newDesc,
-          created_by: user.id,
-          created_at: new Date()
-        }]);
-        if (!error) {
-          setNewChan('');
-          setNewDesc('');
-          setShowCreate(false);
-          fetchChannels();
-          showAlert(`Channel "${newChan}" dibuat!`, "success");
-        }
+          createdBy: user.uid,
+          createdAt: new Date()
+        });
+        setNewChan('');
+        setNewDesc('');
+        setShowCreate(false);
+        showAlert(`Channel "${newChan}" dibuat!`, "success");
       };
 
       const createGroupDM = () => {
         if (selectedUsers.length === 0) return;
-        const ids = [user.id, ...selectedUsers].sort();
+        const ids = [user.uid, ...selectedUsers].sort();
         const dmId = ids.join('_');
-        const name = [user.email, ...selectedUsers.map(uid => onlineUsers.find(u => u.id === uid)?.email)].join(', ');
+        const name = [user.email, ...selectedUsers.map(u => onlineUsers.find(ou => ou.id === u)?.email)].join(', ');
         setActiveChat({ type: 'dm', id: dmId, name });
         setSelectedUsers([]);
         setShowGroup(false);
       };
 
       const addReaction = async (msgId, emoji) => {
-        const { data: msg } = await supabase.from('messages').select('reactions').eq('id', msgId).single();
-        const reactions = { ...msg.reactions, [emoji]: (msg.reactions?.[emoji] || 0) + 1 };
-        await supabase.from('messages').update({ reactions }).eq('id', msgId);
+        const ref = db.collection('messages').doc(msgId);
+        const snap = await ref.get();
+        const reactions = snap.data()?.reactions || {};
+        reactions[emoji] = (reactions[emoji] || 0) + 1;
+        await ref.update({ reactions });
       };
 
+      const leaveChat = () => setActiveChat(null);
       const deleteChannel = async (id) => {
         if (window.confirm("Padam channel ini?")) {
-          await supabase.from('channels').delete().eq('id', id);
-          await supabase.from('messages').delete().eq('chat_id', id);
+          await db.collection('channels').doc(id).delete();
+          await db.collection('messages').where('chatId', '==', id).get().then(s => s.docs.forEach(d => d.ref.delete()));
           if (activeChat?.id === id) setActiveChat(null);
-          fetchChannels();
           showAlert("Channel dipadam", "success");
         }
       };
 
-      const leaveChat = () => setActiveChat(null);
-
       const filteredChannels = channels.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
-      const filteredUsers = onlineUsers.filter(u => u.email.toLowerCase().includes(searchQuery.toLowerCase()));
+      const filteredUsers = onlineUsers.filter(u => u.online && u.email.toLowerCase().includes(searchQuery.toLowerCase()));
 
       return (
         <div className="flex h-full">
@@ -376,7 +385,7 @@
             <div className="p-2">
               <input
                 type="text"
-                placeholder="Cari..."
+                placeholder="Cari channel/pengguna..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="w-full p-2 border rounded dark:bg-gray-700"
@@ -394,18 +403,20 @@
             </div>
 
             <div className="flex-1 overflow-y-auto p-2">
-              <h3 className="font-semibold mb-2">Online ({onlineUsers.length})</h3>
+              {/* Online Users */}
+              <h3 className="font-semibold mb-2">Online ({onlineUsers.filter(u => u.online).length})</h3>
               {filteredUsers.map(u => (
-                <div key={u.id} className="flex items-center p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-sm cursor-pointer" onClick={() => setActiveChat({ type: 'dm', id: [user.id, u.id].sort().join('_'), name: u.email })}>
+                <div key={u.id} className="flex items-center p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-sm cursor-pointer" onClick={() => setActiveChat({ type: 'dm', id: [user.uid, u.uid].sort().join('_'), name: u.email })}>
                   <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center text-white text-xs">{u.email[0].toUpperCase()}</div>
                   <span className="ml-2">{u.email}</span>
+                  <span className="text-xs opacity-60 ml-auto">{u.online ? 'Online' : 'Offline'}</span>
                 </div>
               ))}
 
               <div className="flex justify-between mt-4">
                 <h3 className="font-semibold">Channels</h3>
                 {isAdmin && <button onClick={() => setShowCreate(true)} className="text-xs bg-blue-100 dark:bg-blue-900 px-1 rounded">+</button>}
-                <button onClick={() => setShowGroup(true)} className="text-xs bg-gray-100 dark:bg-gray-700 px-1 rounded">Group</button>
+                <button onClick={() => setShowGroup(true)} className="text-xs bg-gray-100 dark:bg-gray-700 px-1 rounded">Group DM</button>
               </div>
 
               {showCreate && isAdmin && (
@@ -419,7 +430,8 @@
 
               {showGroup && (
                 <div className="p-2 border rounded bg-gray-50 dark:bg-gray-700 mb-2">
-                  {onlineUsers.map(u => (
+                  <p className="text-xs mb-1">Pilih pengguna:</p>
+                  {onlineUsers.filter(u => u.id !== user.uid).map(u => (
                     <label key={u.id} className="flex items-center text-xs p-1">
                       <input type="checkbox" checked={selectedUsers.includes(u.id)} onChange={e => {
                         if (e.target.checked) setSelectedUsers(s => [...s, u.id]);
@@ -428,7 +440,7 @@
                       {u.email}
                     </label>
                   ))}
-                  <button onClick={createGroupDM} className="bg-blue-500 text-white px-2 py-0.5 text-xs rounded mr-1">Buat</button>
+                  <button onClick={createGroupDM} className="bg-blue-500 text-white px-2 py-0.5 text-xs rounded mr-1">Buat Group</button>
                   <button onClick={() => setShowGroup(false)} className="bg-gray-300 dark:bg-gray-600 px-2 py-0.5 text-xs rounded">Batal</button>
                 </div>
               )}
@@ -453,12 +465,16 @@
                 {activeChat.description && <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-2 py-1 rounded">{activeChat.description}</span>}
               </div>
 
+              {/* Pinned Messages */}
               {pinnedMessages.length > 0 && (
                 <div className="bg-yellow-50 dark:bg-yellow-900 border-b p-2 text-xs">
-                  {pinnedMessages.map(m => <div key={m.id}>📌 {m.text.substring(0, 30)}...</div>)}
+                  {pinnedMessages.map(m => (
+                    <div key={m.id} className="italic">📌 {m.text.substring(0, 30)}...</div>
+                  ))}
                 </div>
               )}
 
+              {/* Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-900" onContextMenu={e => e.preventDefault()}>
                 {messages.map(m => (
                   <div
@@ -467,17 +483,17 @@
                       e.preventDefault();
                       setContextMenu({ show: true, x: e.pageX, y: e.pageY, message: m });
                     }}
-                    className={`flex ${m.sender_id === user.id ? 'justify-end' : 'justify-start'}`}
+                    className={`flex ${m.senderId === user.uid ? 'justify-end' : 'justify-start'}`}
                   >
-                    <div className={`max-w-xs lg:max-w-md px-3 py-2 rounded-lg ${
-                      m.sender_id === user.id ? 'bg-blue-500 text-white' : 'bg-white dark:bg-gray-700 shadow'
+                    <div className={`max-w-xs lg:max-w-md px-3 py-2 rounded-lg relative ${
+                      m.senderId === user.uid ? 'bg-blue-500 text-white' : 'bg-white dark:bg-gray-700 shadow'
                     }`}>
                       <p className="text-sm">{m.text}</p>
-                      <p className="text-xs mt-1 opacity-70">{new Date(m.created_at).toLocaleTimeString()}</p>
+                      <p className="text-xs mt-1 opacity-70">{new Date(m.timestamp?.seconds * 1000).toLocaleTimeString()}</p>
                       {m.reactions && (
-                        <div className="flex gap-1 mt-1">
-                          {Object.entries(m.reactions).map(([e, c]) => (
-                            <span key={e} className="bg-gray-200 dark:bg-gray-600 px-1 rounded text-xs">{e}{c}</span>
+                        <div className="flex gap-1 mt-1 text-sm">
+                          {Object.entries(m.reactions).map(([emoji, count]) => (
+                            <span key={emoji} className="bg-gray-200 dark:bg-gray-600 px-1 rounded text-xs">{emoji}{count}</span>
                           ))}
                         </div>
                       )}
@@ -488,12 +504,13 @@
                 <div ref={messagesEndRef} />
               </div>
 
+              {/* Input */}
               <div className="p-3 bg-white dark:bg-gray-800 border-t">
                 <div className="flex">
                   <input
                     type="text"
                     value={newMessage}
-                    onChange={e => setNewMessage(e.target.value)}
+                    onChange={e => { setNewMessage(e.target.value); sendTyping(); }}
                     onKeyPress={e => e.key === 'Enter' && sendMessage()}
                     placeholder="Taip mesej..."
                     className="flex-1 p-2 border rounded-l focus:outline-none dark:bg-gray-700 dark:border-gray-600"
