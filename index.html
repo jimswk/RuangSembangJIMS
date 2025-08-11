@@ -10,7 +10,7 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <!-- Firebase -->
+  <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
@@ -22,16 +22,10 @@
       darkMode: 'class',
       theme: {
         extend: {
-          fontSize: {
-            'xs': '0.75rem',
-            'sm': '0.875rem',
-            'base': '1rem',
-            'lg': '1.125rem',
-            'xl': '1.25rem'
-          }
+          fontSize: { 'xs': '0.75rem', 'sm': '0.875rem', 'base': '1rem', 'lg': '1.125rem', 'xl': '1.25rem' }
         }
       }
-    };
+    }
   </script>
 
   <!-- Notifikasi Bunyi -->
@@ -77,8 +71,15 @@
           style={{ left: x, top: y }}
           onMouseLeave={onClose}
         >
-          {['Info Mesej', 'Balas', 'Salin', 'Reaksi', 'Majukan', 'Sematkan', 'Bintang', 'Sunting', 'Padam'].map(a => (
-            <div key={a} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer" onClick={() => { onAction(a); onClose(); }}>
+          {[
+            'Info Mesej', 'Balas', 'Salin', 'Reaksi', 'Majukan',
+            'Sematkan', 'Bintang', 'Sunting', 'Padam'
+          ].map(a => (
+            <div
+              key={a}
+              className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+              onClick={() => { onAction(a); onClose(); }}
+            >
               {a}
             </div>
           ))}
@@ -86,13 +87,13 @@
       );
     };
 
-    // Emoji Picker - Fixed Position Below Input
-    const EmojiPicker = ({ onPick, onClose, style }) => {
+    // Emoji Picker
+    const EmojiPicker = ({ onPick }) => {
       const emojis = ['👍', '❤️', '😂', '🎉', '🔥', '👏', '👀', '🙏'];
       return (
-        <div style={style} className="grid grid-cols-8 gap-1 p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-40 absolute mt-1">
+        <div className="grid grid-cols-8 gap-1 p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow absolute mt-1 z-40">
           {emojis.map(emoji => (
-            <button key={emoji} onClick={() => { onPick(emoji); onClose(); }} className="text-lg hover:bg-gray-100 dark:hover:bg-gray-700 p-1 rounded">
+            <button key={emoji} onClick={() => onPick(emoji)} className="text-lg hover:bg-gray-100 dark:hover:bg-gray-700 p-1">
               {emoji}
             </button>
           ))}
@@ -114,11 +115,10 @@
       const [starredMessages, setStarredMessages] = useState([]);
       const [showStarred, setShowStarred] = useState(false);
       const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-      const [emojiPickerPos, setEmojiPickerPos] = useState({ top: 0, left: 0 });
       const [replyTo, setReplyTo] = useState(null);
 
       const notificationSound = document.getElementById('notificationSound');
-      const emojiButtonRef = useRef(null);
+      const emojiRef = useRef(null);
 
       useEffect(() => {
         const unsub = auth.onAuthStateChanged(async (u) => {
@@ -188,9 +188,7 @@
               setShowStarred={setShowStarred}
               showEmojiPicker={showEmojiPicker}
               setShowEmojiPicker={setShowEmojiPicker}
-              emojiPickerPos={emojiPickerPos}
-              setEmojiPickerPos={setEmojiPickerPos}
-              emojiButtonRef={emojiButtonRef}
+              emojiRef={emojiRef}
               replyTo={replyTo}
               setReplyTo={setReplyTo}
             />
@@ -234,7 +232,10 @@
                   setReplyTo({ sender: msg.senderEmail, text: msg.text, id: msg.id });
                 } else if (action === 'Majukan') {
                   const target = prompt("Masukkan nama channel atau emel");
-                  if (target) showAlert("Mesej dimajukan ke " + target, "info");
+                  if (target) {
+                    // Logik majukan – anda boleh tambah pilih dari senarai
+                    showAlert("Fungsi majukan: " + target, "info");
+                  }
                 } else if (action === 'Info Mesej') {
                   const sender = msg.senderEmail || "Unknown";
                   const time = new Date(msg.timestamp?.seconds * 1000).toLocaleString();
@@ -245,25 +246,24 @@
             />
           )}
           {showEmojiPicker && (
-            <EmojiPicker
-              onPick={async (emoji) => {
+            <div ref={emojiRef} style={{ position: 'absolute', top: contextMenu.y, left: contextMenu.x }}>
+              <EmojiPicker onPick={async (emoji) => {
                 const msgId = contextMenu.messageId;
                 const ref = db.collection('messages').doc(msgId);
                 const snap = await ref.get();
                 const reactions = { ...(snap.data()?.reactions || {}) };
                 reactions[emoji] = (reactions[emoji] || 0) + 1;
                 await ref.update({ reactions });
+                setShowEmojiPicker(false);
                 showAlert(`Reaksi: ${emoji}`, "success");
-              }}
-              onClose={() => setShowEmojiPicker(false)}
-              style={emojiPickerPos}
-            />
+              }} />
+            </div>
           )}
         </div>
       );
     };
 
-    // AuthScreen & ChatApp sama seperti sebelumnya (lihat bawah)
+    // AuthScreen
     const AuthScreen = ({ authStep, setAuthStep, showAlert }) => {
       const [email, setEmail] = useState('');
       const [password, setPassword] = useState('');
@@ -314,12 +314,13 @@
       );
     };
 
+    // ChatApp
     const ChatApp = ({
       user, isAdmin, darkMode, setDarkMode, textSize, setTextSize,
       handleLogout, showAlert, contextMenu, setContextMenu, playNotif,
       pinnedMessages, setPinnedMessages, starredMessages, setStarredMessages,
       showStarred, setShowStarred, showEmojiPicker, setShowEmojiPicker,
-      emojiPickerPos, setEmojiPickerPos, emojiButtonRef, replyTo, setReplyTo
+      emojiRef, replyTo, setReplyTo
     }) => {
       const [channels, setChannels] = useState([]);
       const [onlineUsers, setOnlineUsers] = useState([]);
@@ -392,17 +393,6 @@
         showAlert(`Channel "${newChan}" dibuat!`, "success");
       };
 
-      const openEmojiPicker = () => {
-        if (emojiButtonRef.current) {
-          const rect = emojiButtonRef.current.getBoundingClientRect();
-          setEmojiPickerPos({
-            top: rect.bottom + window.scrollY,
-            left: rect.left + window.scrollX
-          });
-        }
-        setShowEmojiPicker(!showEmojiPicker);
-      };
-
       const filteredChannels = channels.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
       const filteredUsers = onlineUsers.filter(u => u.online && u.email.toLowerCase().includes(searchQuery.toLowerCase()));
 
@@ -410,14 +400,21 @@
         <div className="flex h-full">
           {/* Sidebar */}
           <div className="w-80 bg-white dark:bg-gray-800 border-r dark:border-gray-700 flex flex-col">
-            {/* ... (sama seperti sebelumnya) */}
             <div className="p-4 border-b dark:border-gray-700 flex justify-between items-center">
               <h1 className="text-xl font-bold">JIMS Sembang</h1>
               <button onClick={handleLogout} className="text-sm text-red-500">Keluar</button>
             </div>
+
             <div className="p-2">
-              <input type="text" placeholder="Cari..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full p-2 border rounded dark:bg-gray-700" />
+              <input
+                type="text"
+                placeholder="Cari..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="w-full p-2 border rounded dark:bg-gray-700"
+              />
             </div>
+
             <div className="p-2 space-y-2 text-sm">
               <label className="flex items-center">
                 <input type="checkbox" checked={darkMode} onChange={() => setDarkMode(!darkMode)} className="mr-2" />
@@ -427,6 +424,7 @@
                 {['xs', 'sm', 'base', 'lg', 'xl'].map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
+
             <div className="flex-1 overflow-y-auto p-2">
               {!showStarred ? (
                 <>
@@ -437,11 +435,13 @@
                       <span className="ml-2">{u.email}</span>
                     </div>
                   ))}
+
                   <div className="flex justify-between mt-4">
                     <h3 className="font-semibold">Channels</h3>
                     {isAdmin && <button onClick={() => setShowCreate(true)} className="text-xs bg-blue-100 dark:bg-blue-900 px-1 rounded">+</button>}
                     <button onClick={() => setShowStarred(true)} className="text-xs bg-yellow-100 dark:bg-yellow-900 px-1 rounded">⭐</button>
                   </div>
+
                   {showCreate && isAdmin && (
                     <div className="p-2 border rounded bg-gray-50 dark:bg-gray-700 mb-2">
                       <input placeholder="Nama channel" value={newChan} onChange={e => setNewChan(e.target.value)} className="w-full p-1 mb-1 border rounded text-sm dark:bg-gray-600" />
@@ -450,6 +450,7 @@
                       <button onClick={() => setShowCreate(false)} className="bg-gray-300 dark:bg-gray-600 px-2 py-0.5 text-xs rounded">Batal</button>
                     </div>
                   )}
+
                   {filteredChannels.map(c => (
                     <div key={c.id} className="flex justify-between items-center p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-sm">
                       <span onClick={() => { setActiveChat({ type: 'channel', id: c.id, name: c.name, description: c.description }); setShowStarred(false); }} className="cursor-pointer">#{c.name}</span>
@@ -518,13 +519,10 @@
                         {new Date(m.timestamp?.seconds * 1000).toLocaleTimeString()}
                         {m.edited && " • dikemaskini"}
                       </p>
-                      {/* Reaksi di bawah bubble */}
                       {m.reactions && Object.keys(m.reactions).length > 0 && (
-                        <div className="flex gap-1 mt-1 border-t pt-1 border-gray-300 dark:border-gray-600">
-                          {Object.entries(m.reactions).map(([emoji, count]) => (
-                            <span key={emoji} className="bg-gray-200 dark:bg-gray-600 text-sm px-1.5 py-0.5 rounded-full">
-                              {emoji} {count}
-                            </span>
+                        <div className="flex gap-1 mt-1 text-sm">
+                          {Object.entries(m.reactions).map(([e, c]) => (
+                            <span key={e} className="bg-gray-200 dark:bg-gray-600 px-1 rounded text-xs">{e}{c}</span>
                           ))}
                         </div>
                       )}
@@ -534,20 +532,18 @@
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Reply Box */}
+              {/* Reply Box + Input */}
               {replyTo && (
-                <div className="bg-gray-100 dark:bg-gray-700 p-2 text-sm flex items-center border-b">
+                <div className="bg-gray-100 dark:bg-gray-700 p-2 text-sm flex items-center">
                   <div className="flex-1">
                     <p className="text-xs text-gray-500">Balas kepada {replyTo.sender}</p>
                     <p className="truncate">{replyTo.text}</p>
                   </div>
-                  <button onClick={() => setReplyTo(null)} className="text-red-500 ml-2 font-bold">✕</button>
+                  <button onClick={() => setReplyTo(null)} className="text-red-500 ml-2">✕</button>
                 </div>
               )}
-
-              {/* Input */}
-              <div className="p-3 bg-white dark:bg-gray-800 border-t relative">
-                <div className="flex">
+              <div className="p-3 bg-white dark:bg-gray-800 border-t">
+                <div className="flex relative">
                   <input
                     type="text"
                     value={newMessage}
@@ -557,9 +553,8 @@
                     className="flex-1 p-2 border rounded-l focus:outline-none dark:bg-gray-700 dark:border-gray-600"
                   />
                   <button
-                    ref={emojiButtonRef}
-                    onClick={openEmojiPicker}
-                    className="px-3 bg-gray-200 dark:bg-gray-600 rounded-r-l hover:bg-gray-300 dark:hover:bg-gray-500"
+                    onClick={() => setShowEmojiPicker(prev => !prev)}
+                    className="px-3 bg-gray-200 dark:bg-gray-600 rounded-r-l"
                   >
                     😊
                   </button>
