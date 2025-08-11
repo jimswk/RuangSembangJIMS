@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>JIMS Ruang Sembang</title>
+
+  <!-- React & ReactDOM dari CDN -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <!-- Babel untuk JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Tailwind Config -->
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontSize: {
+            'xs': '0.75rem',
+            'sm': '0.875rem',
+            'base': '1rem',
+            'lg': '1.125rem',
+            'xl': '1.25rem',
+            '2xl': '1.5rem',
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Notifikasi bunyi -->
+  <audio id="notificationSound" src="https://assets.mixkit.co/sfx/preview/mixkit-software-interface-start-2574.mp3" preload="auto"></audio>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 h-screen overflow-hidden">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    // Firebase Config
+    const firebaseConfig = {
+      apiKey: "AIzaSyA8L6_srjWF7mk-7k5UGk2vH_klYYOkU5U",
+      authDomain: "ruangsembangjimsv2.firebaseapp.com",
+      projectId: "ruangsembangjimsv2",
+      storageBucket: "ruangsembangjimsv2.firebasestorage.app",
+      messagingSenderId: "180755101546",
+      appId: "1:180755101546:web:5bd96908400e3f59689713",
+      measurementId: "G-76BVBVGYZ1"
+    };
+
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+    const storage = firebase.storage();
+
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // Context Menu
+    const ContextMenu = ({ show, x, y, onClose, onAction }) => {
+      if (!show) return null;
+      return (
+        <div
+          className="absolute z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg py-1 text-sm min-w-32"
+          style={{ left: x, top: y }}
+          onMouseLeave={onClose}
+        >
+          {[
+            'Info Mesej', 'Balas', 'Salin', 'Reaksi', 'Majukan',
+            'Sematkan', 'Bintang', 'Sunting', 'Padam'
+          ].map((action) => (
+            <div
+              key={action}
+              className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+              onClick={() => {
+                onAction(action);
+                onClose();
+              }}
+            >
+              {action}
+            </div>
+          ))}
+        </div>
+      );
+    };
+
+    // Popup Alert
+    const PopupAlert = ({ message, type = "info", onClose }) => {
+      useEffect(() => {
+        const timer = setTimeout(onClose, 3000);
+        return () => clearTimeout(timer);
+      }, [onClose]);
+      const bgColor = type === "success" ? "bg-green-500" : "bg-blue-500";
+      return (
+        <div className={`fixed top-4 right-4 ${bgColor} text-white px-4 py-2 rounded shadow-lg z-50 transition-opacity duration-300`}>
+          {message}
+        </div>
+      );
+    };
+
+    // Main App
+    const App = () => {
+      const [user, setUser] = useState(null);
+      const [isAdmin, setIsAdmin] = useState(false);
+      const [loading, setLoading] = useState(true);
+      const [showAlert, setShowAlert] = useState(false);
+      const [alertMsg, setAlertMsg] = useState("");
+      const [alertType, setAlertType] = useState("info");
+      const [darkMode, setDarkMode] = useState(false);
+      const [textSize, setTextSize] = useState('base');
+      const [showLogin, setShowLogin] = useState(true);
+      const [authStep, setAuthStep] = useState('login'); // login, register, forgot
+      const [contextMenu, setContextMenu] = useState({ show: false, x: 0, y: 0, message: null });
+
+      const notificationSound = document.getElementById('notificationSound');
+
+      useEffect(() => {
+        const unsubscribe = auth.onAuthStateChanged((authUser) => {
+          if (authUser) {
+            db.collection('users').doc(authUser.uid).set({
+              uid: authUser.uid,
+              email: authUser.email,
+              lastSeen: new Date(),
+              online: true
+            }, { merge: true });
+
+            setUser(authUser);
+            setIsAdmin(authUser.email?.endsWith('@imi.gov.my'));
+          } else {
+            setUser(null);
+            setIsAdmin(false);
+          }
+          setLoading(false);
+        });
+
+        return () => unsubscribe();
+      }, []);
+
+      useEffect(() => {
+        if (darkMode) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      }, [darkMode]);
+
+      const showAlertMsg = (msg, type = "info") => {
+        setAlertMsg(msg);
+        setAlertType(type);
+        setShowAlert(true);
+      };
+
+      const playNotification = () => {
+        notificationSound.currentTime = 0;
+        notificationSound.play().catch(() => {});
+      };
+
+      const handleLogout = async () => {
+        if (user) {
+          await db.collection('users').doc(user.uid).update({ online: false, lastSeen: new Date() });
+        }
+        await auth.signOut();
+        setUser(null);
+        showAlertMsg("Berjaya log keluar", "success");
+      };
+
+      if (loading) {
+        return <div className="flex items-center justify-center h-screen">Memuatkan...</div>;
+      }
+
+      return (
+        <div className={`flex flex-col h-screen ${textSize}`}>
+          {showAlert && (
+            <PopupAlert message={alertMsg} type={alertType} onClose={() => setShowAlert(false)} />
+          )}
+          {user ? (
+            <ChatApp
+              user={user}
+              isAdmin={isAdmin}
+              darkMode={darkMode}
+              setDarkMode={setDarkMode}
+              textSize={textSize}
+              setTextSize={setTextSize}
+              handleLogout={handleLogout}
+              showAlertMsg={showAlertMsg}
+              contextMenu={contextMenu}
+              setContextMenu={setContextMenu}
+              playNotification={playNotification}
+            />
+          ) : (
+            <AuthScreen
+              showLogin={showLogin}
+              setShowLogin={setShowLogin}
+              authStep={authStep}
+              setAuthStep={setAuthStep}
+              showAlertMsg={showAlertMsg}
+            />
+          )}
+          {contextMenu.show && (
+            <ContextMenu
+              show={contextMenu.show}
+              x={contextMenu.x}
+              y={contextMenu.y}
+              onClose={() => setContextMenu({ show: false })}
+              onAction={(action) => {
+                console.log("Action:", action, "on", contextMenu.message);
+                if (action === 'Padam') {
+                  db.collection('messages').doc(contextMenu.message.id).delete();
+                }
+                // Implement lain-lain action di sini
+              }}
+            />
+          )}
+        </div>
+      );
+    };
+
+    // Auth Screen
+    const AuthScreen = ({ showLogin, setShowLogin, authStep, setAuthStep, showAlertMsg }) => {
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [confirmPassword, setConfirmPassword] = useState('');
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        try {
+          if (authStep === 'login') {
+            await auth.signInWithEmailAndPassword(email, password);
+            showAlertMsg("Berjaya log masuk!", "success");
+          } else if (authStep === 'register') {
+            if (password !== confirmPassword) {
+              showAlertMsg("Kata laluan tidak sepadan", "error");
+              return;
+            }
+            const userCred = await auth.createUserWithEmailAndPassword(email, password);
+            await db.collection('users').doc(userCred.user.uid).set({
+              uid: userCred.user.uid,
+              email: email,
+              online: true,
+              lastSeen: new Date()
+            });
+            showAlertMsg("Akaun berjaya didaftarkan!", "success");
+          } else if (authStep === 'forgot') {
+            await auth.sendPasswordResetEmail(email);
+            showAlertMsg("Pautan set semula telah dihantar ke emel anda.", "success");
+            setAuthStep('login');
+          }
+        } catch (err) {
+          showAlertMsg(err.message, "error");
+        }
+      };
+
+      return (
+        <div className="flex h-full bg-gray-50 dark:bg-gray-900">
+          <div className="m-auto bg-white dark:bg-gray-800 p-8 rounded shadow-md w-96">
+            <h2 className="text-2xl font-bold mb-6 text-center">
+              {authStep === 'login' ? 'Log Masuk' : authStep === 'register' ? 'Daftar Akaun' : 'Lupa Kata Laluan'}
+            </h2>
+            <form onSubmit={handleSubmit}>
+              <input
+                type="email"
+                placeholder="Emel"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className="w-full p-2 mb-4 border rounded dark:bg-gray-700 dark:border-gray-600"
+              />
+              {authStep !== 'forgot' && (
+                <input
+                  type="password"
+                  placeholder="Kata Laluan"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  className="w-full p-2 mb-4 border rounded dark:bg-gray-700 dark:border-gray-600"
+                />
+              )}
+              {authStep === 'register' && (
+                <input
+                  type="password"
+                  placeholder="Sahkan Kata Laluan"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                  className="w-full p-2 mb-4 border rounded dark:bg-gray-700 dark:border-gray-600"
+                />
+              )}
+              <button
+                type="submit"
+                className="w-full bg-blue-500 hover:bg-blue-600 text-white p-2 rounded"
+              >
+                {authStep === 'login' ? 'Log Masuk' : authStep === 'register' ? 'Daftar' : 'Hantar Pautan'}
+              </button>
+            </form>
+            <div className="mt-4 text-center">
+              {authStep === 'login' ? (
+                <>
+                  <p>
+                    <a onClick={() => setAuthStep('forgot')} className="text-blue-500 cursor-pointer">Lupa kata laluan?</a>
+                  </p>
+                  <p>
+                    Belum ada akaun?{' '}
+                    <a onClick={() => setAuthStep('register')} className="text-blue-500 cursor-pointer">Daftar</a>
+                  </p>
+                </>
+              ) : (
+                <p>
+                  Sudah ada akaun?{' '}
+                  <a onClick={() => setAuthStep('login')} className="text-blue-500 cursor-pointer">Log Masuk</a>
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ChatApp Component
+    const ChatApp = ({
+      user,
+      isAdmin,
+      darkMode,
+      setDarkMode,
+      textSize,
+      setTextSize,
+      handleLogout,
+      showAlertMsg,
+      contextMenu,
+      setContextMenu,
+      playNotification
+    }) => {
+      const [activeChat, setActiveChat] = useState(null); // { type: 'channel' | 'dm', id, name, description? }
+      const [channels, setChannels] = useState([]);
+      const [onlineUsers, setOnlineUsers] = useState([]);
+      const [messages, setMessages] = useState([]);
+      const [newMessage, setNewMessage] = useState('');
+      const [showCreateChannel, setShowCreateChannel] = useState(false);
+      const [newChannelName, setNewChannelName] = useState('');
+      const [newChannelDesc, setNewChannelDesc] = useState('');
+      const [searchQuery, setSearchQuery] = useState('');
+      const messagesEndRef = useRef(null);
+
+      const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      };
+
+      useEffect(() => {
+        const unsubscribeChannels = db.collection('channels').onSnapshot(snap => {
+          const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          setChannels(list);
+        });
+
+        const unsubscribeUsers = db.collection('users').onSnapshot(snap => {
+          const list = snap.docs
+            .map(doc => ({ id: doc.id, ...doc.data() }))
+            .filter(u => u.online);
+          setOnlineUsers(list);
+        });
+
+        return () => {
+          unsubscribeChannels();
+          unsubscribeUsers();
+        };
+      }, []);
+
+      useEffect(() => {
+        if (activeChat?.id) {
+          const unsubscribe = db.collection('messages')
+            .where('chatId', '==', activeChat.id)
+            .orderBy('timestamp', 'asc')
+            .onSnapshot(snap => {
+              const msgs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+              setMessages(msgs);
+              scrollToBottom();
+            });
+          return () => unsubscribe();
+        }
+      }, [activeChat]);
+
+      const handleSendMessage = async () => {
+        if (!newMessage.trim() || !activeChat) return;
+        await db.collection('messages').add({
+          text: newMessage,
+          senderId: user.uid,
+          senderEmail: user.email,
+          chatId: activeChat.id,
+          timestamp: new Date(),
+          type: activeChat.type
+        });
+        setNewMessage('');
+      };
+
+      const createChannel = async () => {
+        if (!newChannelName) return;
+        const doc = await db.collection('channels').add({
+          name: newChannelName,
+          description: newChannelDesc,
+          createdBy: user.uid,
+          createdAt: new Date()
+        });
+        showAlertMsg(`Channel "${newChannelName}" berjaya dibuat!`, "success");
+        setNewChannelName('');
+        setNewChannelDesc('');
+        setShowCreateChannel(false);
+      };
+
+      const deleteChannel = async (channelId) => {
+        if (window.confirm("Padam channel ini?")) {
+          await db.collection('channels').doc(channelId).delete();
+          await db.collection('messages').where('chatId', '==', channelId).get().then(snap => {
+            snap.docs.forEach(d => d.ref.delete());
+          });
+          showAlertMsg("Channel berjaya dipadam.", "success");
+          if (activeChat?.id === channelId) setActiveChat(null);
+        }
+      };
+
+      const leaveChannel = async () => {
+        setActiveChat(null);
+        showAlertMsg("Anda telah keluar dari channel ini.");
+      };
+
+      const openDM = (targetUser) => {
+        const dmId = [user.uid, targetUser.uid].sort().join('_');
+        setActiveChat({ type: 'dm', id: dmId, name: targetUser.email });
+      };
+
+      const filteredChannels = channels.filter(ch =>
+        ch.name.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+
+      const filteredUsers = onlineUsers.filter(u =>
+        u.email.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+
+      return (
+        <div className="flex h-full">
+          {/* Sidebar */}
+          <div className="w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
+            {/* Header */}
+            <div className="p-4 border-b dark:border-gray-700 flex justify-between items-center">
+              <h1 className="text-xl font-bold">JIMS Sembang</h1>
+              <button onClick={handleLogout} className="text-sm text-red-500">Keluar</button>
+            </div>
+
+            {/* Search */}
+            <div className="p-2">
+              <input
+                type="text"
+                placeholder="Cari channel atau pengguna..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600"
+              />
+            </div>
+
+            {/* Settings */}
+            <div className="p-2 space-y-2 text-sm">
+              <label className="flex items-center">
+                <input type="checkbox" checked={darkMode} onChange={() => setDarkMode(!darkMode)} className="mr-2" />
+                Dark Mode
+              </label>
+              <select value={textSize} onChange={(e) => setTextSize(e.target.value)} className="w-full p-1 border rounded dark:bg-gray-700">
+                {['xs', 'sm', 'base', 'lg', 'xl', '2xl'].map(size => (
+                  <option key={size} value={size}>{size}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Online Users */}
+            <div className="flex-1 overflow-y-auto p-2">
+              <h3 className="font-semibold mb-2">Pengguna Online ({onlineUsers.length})</h3>
+              {filteredUsers.map(u => (
+                <div
+                  key={u.id}
+                  onClick={() => openDM(u)}
+                  className="flex items-center p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer"
+                >
+                  <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white text-xs">
+                    {u.email[0].toUpperCase()}
+                  </div>
+                  <span className="ml-2 text-sm">{u.email}</span>
+                </div>
+              ))}
+
+              <h3 className="font-semibold my-2">Channels</h3>
+              {isAdmin && (
+                <button
+                  onClick={() => setShowCreateChannel(true)}
+                  className="w-full text-left p-2 bg-blue-100 dark:bg-blue-900 rounded text-blue-700 dark:text-blue-300 text-sm mb-2"
+                >
+                  + Buat Channel
+                </button>
+              )}
+              {showCreateChannel && isAdmin && (
+                <div className="p-2 border rounded bg-gray-50 dark:bg-gray-700 mb-2">
+                  <input
+                    type="text"
+                    placeholder="Nama channel"
+                    value={newChannelName}
+                    onChange={(e) => setNewChannelName(e.target.value)}
+                    className="w-full p-1 mb-1 border rounded text-sm dark:bg-gray-600"
+                  />
+                  <textarea
+                    placeholder="Deskripsi (optional)"
+                    value={newChannelDesc}
+                    onChange={(e) => setNewChannelDesc(e.target.value)}
+                    className="w-full p-1 mb-1 border rounded text-sm dark:bg-gray-600"
+                    rows="2"
+                  />
+                  <div className="flex gap-1">
+                    <button onClick={createChannel} className="bg-green-500 text-white px-2 py-1 text-xs rounded">Buat</button>
+                    <button onClick={() => setShowCreateChannel(false)} className="bg-gray-300 dark:bg-gray-600 px-2 py-1 text-xs rounded">Batal</button>
+                  </div>
+                </div>
+              )}
+              {filteredChannels.map(ch => (
+                <div key={ch.id} className="flex justify-between items-center p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer text-sm">
+                  <span onClick={() => setActiveChat({ type: 'channel', id: ch.id, name: ch.name, description: ch.description })}>
+                    #{ch.name}
+                  </span>
+                  {activeChat?.id === ch.id && (
+                    <button onClick={leaveChannel} className="text-xs text-red-500">Keluar</button>
+                  )}
+                  {isAdmin && (
+                    <button onClick={() => deleteChannel(ch.id)} className="text-xs text-red-700 ml-1">×</button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Chat Area */}
+          {!activeChat ? (
+            <div className="flex-1 flex items-center justify-center text-gray-500">
+              Pilih channel atau pengguna untuk mula bersembang
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col">
+              {/* Chat Header */}
+              <div className="p-3 border-b bg-white dark:bg-gray-800 dark:border-gray-700 flex items-center">
+                <h2 className="font-bold">{activeChat.name}</h2>
+                {activeChat.description && (
+                  <span className="ml-2 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-2 py-1 rounded">
+                    {activeChat.description}
+                  </span>
+                )}
+              </div>
+
+              {/* Messages */}
+              <div
+                className="flex-1 overflow-y-auto p-4 space-y-2 bg-gray-50 dark:bg-gray-900"
+                onContextMenu={(e) => e.preventDefault()}
+              >
+                {messages.map(msg => (
+                  <div
+                    key={msg.id}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setContextMenu({
+                        show: true,
+                        x: e.pageX,
+                        y: e.pageY,
+                        message: msg
+                      });
+                    }}
+                    className={`flex ${msg.senderId === user.uid ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                        msg.senderId === user.uid
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 shadow'
+                      }`}
+                    >
+                      <p className="text-sm">{msg.text}</p>
+                      <p className="text-xs opacity-70 mt-1">
+                        {new Date(msg.timestamp?.seconds * 1000).toLocaleTimeString()}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Input */}
+              <div className="p-3 bg-white dark:bg-gray-800 border-t dark:border-gray-700">
+                <div className="flex items-center">
+                  <input
+                    type="text"
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                    placeholder="Taip mesej..."
+                    className="flex-1 p-2 border rounded-l focus:outline-none dark:bg-gray-700 dark:border-gray-600"
+                  />
+                  <button
+                    onClick={handleSendMessage}
+                    className="bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-r"
+                  >
+                    Send
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // Render App
+    const container = document.getElementById("root");
+    const root = ReactDOM.createRoot(container);
+    root.render(<App />);
+  </script>
+</body>
+</html>
