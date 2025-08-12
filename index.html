@@ -5,17 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>JIMS Ruang Sembang</title>
 
-  <!-- React & ReactDOM -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
-  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -28,7 +25,6 @@
     }
   </script>
 
-  <!-- Notifikasi Bunyi -->
   <audio id="notificationSound" src="https://assets.mixkit.co/sfx/preview/mixkit-software-interface-start-2574.mp3" preload="auto"></audio>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 h-screen overflow-hidden">
@@ -88,10 +84,20 @@
     };
 
     // Emoji Picker
-    const EmojiPicker = ({ onPick }) => {
+    const EmojiPicker = ({ onPick, onClose }) => {
       const emojis = ['👍', '❤️', '😂', '🎉', '🔥', '👏', '👀', '🙏'];
+      const ref = useRef(null);
+      useEffect(() => {
+        const handleClickOutside = (event) => {
+          if (ref.current && !ref.current.contains(event.target)) {
+            onClose();
+          }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+      }, [onClose]);
       return (
-        <div className="grid grid-cols-8 gap-1 p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow absolute mt-1 z-40">
+        <div ref={ref} className="grid grid-cols-8 gap-1 p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow absolute mt-1 z-40">
           {emojis.map(emoji => (
             <button key={emoji} onClick={() => onPick(emoji)} className="text-lg hover:bg-gray-100 dark:hover:bg-gray-700 p-1">
               {emoji}
@@ -227,7 +233,6 @@
                   showAlert("Teks disalin", "success");
                 } else if (action === 'Reaksi') {
                   setShowEmojiPicker(true);
-                  contextMenu.messageId = msg.id;
                 } else if (action === 'Balas') {
                   setReplyTo({ sender: msg.senderEmail, text: msg.text, id: msg.id });
                 } else if (action === 'Majukan') {
@@ -246,9 +251,9 @@
             />
           )}
           {showEmojiPicker && (
-            <div ref={emojiRef} style={{ position: 'absolute', top: contextMenu.y, left: contextMenu.x }}>
+            <div style={{ position: 'absolute', top: contextMenu.y, left: contextMenu.x, zIndex: 50 }}>
               <EmojiPicker onPick={async (emoji) => {
-                const msgId = contextMenu.messageId;
+                const msgId = contextMenu.message.id;
                 const ref = db.collection('messages').doc(msgId);
                 const snap = await ref.get();
                 const reactions = { ...(snap.data()?.reactions || {}) };
@@ -256,7 +261,7 @@
                 await ref.update({ reactions });
                 setShowEmojiPicker(false);
                 showAlert(`Reaksi: ${emoji}`, "success");
-              }} />
+              }} onClose={() => setShowEmojiPicker(false)} />
             </div>
           )}
         </div>
@@ -550,15 +555,9 @@
                     onChange={e => setNewMessage(e.target.value)}
                     onKeyPress={e => e.key === 'Enter' && sendMessage()}
                     placeholder="Taip mesej..."
-                    className="flex-1 p-2 border rounded-l focus:outline-none dark:bg-gray-700 dark:border-gray-600"
+                    className="flex-1 p-2 border rounded focus:outline-none dark:bg-gray-700 dark:border-gray-600"
                   />
-                  <button
-                    onClick={() => setShowEmojiPicker(prev => !prev)}
-                    className="px-3 bg-gray-200 dark:bg-gray-600 rounded-r-l"
-                  >
-                    😊
-                  </button>
-                  <button onClick={sendMessage} className="bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-r">
+                  <button onClick={sendMessage} className="bg-blue-500 hover:bg-blue-600 text-white p-2 rounded ml-2">
                     Hantar
                   </button>
                 </div>
