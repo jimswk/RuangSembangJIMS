@@ -58,48 +58,31 @@
       );
     };
 
-    // Context Menu
-    const ContextMenu = ({ show, x, y, onClose, onAction }) => {
-      if (!show) return null;
-      return (
-        <div
-          className="absolute z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg py-1 text-sm min-w-32"
-          style={{ left: x, top: y }}
-          onMouseLeave={onClose}
-        >
-          {[
-            'Info Mesej', 'Balas', 'Salin', 'Reaksi', 'Majukan',
-            'Sematkan', 'Bintang', 'Sunting', 'Padam'
-          ].map(a => (
-            <div
-              key={a}
-              className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
-              onClick={() => { onAction(a); onClose(); }}
-            >
-              {a}
-            </div>
-          ))}
-        </div>
-      );
-    };
+    // Reaction Picker
+    const ReactionPicker = ({ x, y, onPick, onClose }) => {
+      const emojis = ['👍', '❤️', '😂', '🎉', '🔥', '👏', '👀', '🙏', '😢']; // Added more emojis for variety
+      const pickerRef = useRef(null);
 
-    // Emoji Picker
-    const EmojiPicker = ({ onPick, onClose }) => {
-      const emojis = ['👍', '❤️', '😂', '🎉', '🔥', '👏', '👀', '🙏'];
-      const ref = useRef(null);
       useEffect(() => {
         const handleClickOutside = (event) => {
-          if (ref.current && !ref.current.contains(event.target)) {
+          if (pickerRef.current && !pickerRef.current.contains(event.target)) {
             onClose();
           }
         };
         document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
+        return () => {
+          document.removeEventListener("mousedown", handleClickOutside);
+        };
       }, [onClose]);
+
       return (
-        <div ref={ref} className="grid grid-cols-8 gap-1 p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow absolute mt-1 z-40">
+        <div
+          ref={pickerRef}
+          className="absolute z-50 p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full shadow-lg flex space-x-2"
+          style={{ top: y, left: x }}
+        >
           {emojis.map(emoji => (
-            <button key={emoji} onClick={() => onPick(emoji)} className="text-lg hover:bg-gray-100 dark:hover:bg-gray-700 p-1">
+            <button key={emoji} onClick={() => onPick(emoji)} className="text-xl p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors duration-200">
               {emoji}
             </button>
           ))}
@@ -116,15 +99,13 @@
       const [darkMode, setDarkMode] = useState(false);
       const [textSize, setTextSize] = useState('base');
       const [authStep, setAuthStep] = useState('login');
-      const [contextMenu, setContextMenu] = useState({ show: false, x: 0, y: 0, message: null });
+      const [reactionState, setReactionState] = useState({ show: false, x: 0, y: 0, messageId: null });
       const [pinnedMessages, setPinnedMessages] = useState([]);
       const [starredMessages, setStarredMessages] = useState([]);
       const [showStarred, setShowStarred] = useState(false);
-      const [showEmojiPicker, setShowEmojiPicker] = useState(false);
       const [replyTo, setReplyTo] = useState(null);
 
       const notificationSound = document.getElementById('notificationSound');
-      const emojiRef = useRef(null);
 
       useEffect(() => {
         const unsub = auth.onAuthStateChanged(async (u) => {
@@ -168,6 +149,17 @@
         showAlert("Berjaya log keluar", "success");
       };
 
+      const handleReactionPick = async (emoji) => {
+        if (!reactionState.messageId) return;
+        const ref = db.collection('messages').doc(reactionState.messageId);
+        const snap = await ref.get();
+        const reactions = { ...(snap.data()?.reactions || {}) };
+        reactions[emoji] = (reactions[emoji] || 0) + 1;
+        await ref.update({ reactions });
+        setReactionState({ show: false, x: 0, y: 0, messageId: null });
+        showAlert(`Reaksi: ${emoji}`, "success");
+      };
+
       if (loading) return <div className="flex items-center justify-center h-screen">Memuatkan...</div>;
 
       return (
@@ -183,8 +175,7 @@
               setTextSize={setTextSize}
               handleLogout={handleLogout}
               showAlert={showAlert}
-              contextMenu={contextMenu}
-              setContextMenu={setContextMenu}
+              setReactionState={setReactionState}
               playNotif={playNotif}
               pinnedMessages={pinnedMessages}
               setPinnedMessages={setPinnedMessages}
@@ -192,77 +183,19 @@
               setStarredMessages={setStarredMessages}
               showStarred={showStarred}
               setShowStarred={setShowStarred}
-              showEmojiPicker={showEmojiPicker}
-              setShowEmojiPicker={setShowEmojiPicker}
-              emojiRef={emojiRef}
               replyTo={replyTo}
               setReplyTo={setReplyTo}
             />
           ) : (
             <AuthScreen setAuthStep={setAuthStep} authStep={authStep} showAlert={showAlert} />
           )}
-          {contextMenu.show && (
-            <ContextMenu
-              show={contextMenu.show}
-              x={contextMenu.x}
-              y={contextMenu.y}
-              onClose={() => setContextMenu({ show: false })}
-              onAction={(action) => {
-                const msg = contextMenu.message;
-                if (action === 'Padam') {
-                  db.collection('messages').doc(msg.id).delete();
-                  showAlert("Mesej dipadam", "success");
-                } else if (action === 'Sunting') {
-                  const newText = prompt("Edit mesej:", msg.text);
-                  if (newText && newText !== msg.text) {
-                    db.collection('messages').doc(msg.id).update({ text: newText, edited: true });
-                    showAlert("Mesej dikemaskini", "success");
-                  }
-                } else if (action === 'Sematkan') {
-                  db.collection('messages').doc(msg.id).update({ pinned: true });
-                  setPinnedMessages(prev => [...prev, msg]);
-                  showAlert("Mesej disematkan", "success");
-                } else if (action === 'Bintang') {
-                  const isStarred = msg.starred || false;
-                  db.collection('messages').doc(msg.id).update({ starred: !isStarred });
-                  if (!isStarred) setStarredMessages(prev => [...prev, msg]);
-                  else setStarredMessages(prev => prev.filter(m => m.id !== msg.id));
-                  showAlert(isStarred ? "Dibatalkan bintang" : "Ditanda bintang", "success");
-                } else if (action === 'Salin') {
-                  navigator.clipboard.writeText(msg.text);
-                  showAlert("Teks disalin", "success");
-                } else if (action === 'Reaksi') {
-                  setShowEmojiPicker(true);
-                } else if (action === 'Balas') {
-                  setReplyTo({ sender: msg.senderEmail, text: msg.text, id: msg.id });
-                } else if (action === 'Majukan') {
-                  const target = prompt("Masukkan nama channel atau emel");
-                  if (target) {
-                    // Logik majukan – anda boleh tambah pilih dari senarai
-                    showAlert("Fungsi majukan: " + target, "info");
-                  }
-                } else if (action === 'Info Mesej') {
-                  const sender = msg.senderEmail || "Unknown";
-                  const time = new Date(msg.timestamp?.seconds * 1000).toLocaleString();
-                  alert(`Info Mesej:\n\nPengirim: ${sender}\nMasa: ${time}\nChat ID: ${msg.chatId}\nID: ${msg.id}`);
-                }
-                setContextMenu({ show: false });
-              }}
+          {reactionState.show && (
+            <ReactionPicker
+              x={reactionState.x}
+              y={reactionState.y}
+              onPick={handleReactionPick}
+              onClose={() => setReactionState({ show: false, x: 0, y: 0, messageId: null })}
             />
-          )}
-          {showEmojiPicker && (
-            <div style={{ position: 'absolute', top: contextMenu.y, left: contextMenu.x, zIndex: 50 }}>
-              <EmojiPicker onPick={async (emoji) => {
-                const msgId = contextMenu.message.id;
-                const ref = db.collection('messages').doc(msgId);
-                const snap = await ref.get();
-                const reactions = { ...(snap.data()?.reactions || {}) };
-                reactions[emoji] = (reactions[emoji] || 0) + 1;
-                await ref.update({ reactions });
-                setShowEmojiPicker(false);
-                showAlert(`Reaksi: ${emoji}`, "success");
-              }} onClose={() => setShowEmojiPicker(false)} />
-            </div>
           )}
         </div>
       );
@@ -322,10 +255,9 @@
     // ChatApp
     const ChatApp = ({
       user, isAdmin, darkMode, setDarkMode, textSize, setTextSize,
-      handleLogout, showAlert, contextMenu, setContextMenu, playNotif,
+      handleLogout, showAlert, setReactionState, playNotif,
       pinnedMessages, setPinnedMessages, starredMessages, setStarredMessages,
-      showStarred, setShowStarred, showEmojiPicker, setShowEmojiPicker,
-      emojiRef, replyTo, setReplyTo
+      showStarred, setShowStarred, replyTo, setReplyTo
     }) => {
       const [channels, setChannels] = useState([]);
       const [onlineUsers, setOnlineUsers] = useState([]);
@@ -400,6 +332,16 @@
 
       const filteredChannels = channels.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
       const filteredUsers = onlineUsers.filter(u => u.online && u.email.toLowerCase().includes(searchQuery.toLowerCase()));
+      
+      const handleContextMenu = (e, message) => {
+        e.preventDefault();
+        setReactionState({
+          show: true,
+          x: e.pageX - 100, // Adjust X position for better placement
+          y: e.pageY - 50,  // Adjust Y position to be above the cursor
+          messageId: message.id
+        });
+      };
 
       return (
         <div className="flex h-full">
@@ -500,15 +442,12 @@
                 </div>
               )}
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-900" onContextMenu={e => e.preventDefault()}>
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
                 {messages.map(m => (
                   <div
                     key={m.id}
-                    onContextMenu={e => {
-                      e.preventDefault();
-                      setContextMenu({ show: true, x: e.pageX, y: e.pageY, message: m });
-                    }}
-                    className={`flex ${m.senderId === user.uid ? 'justify-end' : 'justify-start'}`}
+                    onContextMenu={(e) => handleContextMenu(e, m)}
+                    className={`flex relative ${m.senderId === user.uid ? 'justify-end' : 'justify-start'}`}
                   >
                     <div className={`max-w-xs lg:max-w-md px-3 py-2 rounded-lg ${
                       m.senderId === user.uid ? 'bg-blue-500 text-white' : 'bg-white dark:bg-gray-700 shadow'
