@@ -5,17 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>JIMS Ruang Sembang</title>
 
-  <!-- React & ReactDOM -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
-  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -28,7 +25,6 @@
     }
   </script>
 
-  <!-- Notifikasi Bunyi -->
   <audio id="notificationSound" src="https://assets.mixkit.co/sfx/preview/mixkit-software-interface-start-2574.mp3" preload="auto"></audio>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 h-screen overflow-hidden">
@@ -64,7 +60,7 @@
 
     // Reaction Picker
     const ReactionPicker = ({ x, y, onPick, onClose }) => {
-      const emojis = ['👍', '❤️', '�', '🎉', '🔥', '👏', '👀', '🙏', '😢'];
+      const emojis = ['👍', '❤️', '😂', '🎉', '🔥', '👏', '👀', '🙏', '😢']; // Added more emojis for variety
       const pickerRef = useRef(null);
 
       useEffect(() => {
@@ -104,23 +100,13 @@
       const [textSize, setTextSize] = useState('base');
       const [authStep, setAuthStep] = useState('login');
       const [reactionState, setReactionState] = useState({ show: false, x: 0, y: 0, messageId: null });
-      const [unreadCounts, setUnreadCounts] = useState({});
-      const [lastReadTimestamps, setLastReadTimestamps] = useState({});
-      const [onlineUsers, setOnlineUsers] = useState([]);
-      const [channels, setChannels] = useState([]);
+      const [pinnedMessages, setPinnedMessages] = useState([]);
+      const [starredMessages, setStarredMessages] = useState([]);
+      const [showStarred, setShowStarred] = useState(false);
+      const [replyTo, setReplyTo] = useState(null);
 
       const notificationSound = document.getElementById('notificationSound');
 
-      const handleLogout = async () => {
-        if (user) {
-          await db.collection('users').doc(user.uid).update({ online: false, lastSeen: new Date() });
-          await auth.signOut();
-        }
-        setUser(null);
-        showAlert("Berjaya log keluar", "success");
-      };
-
-      // Efek untuk autentikasi dan status pengguna
       useEffect(() => {
         const unsub = auth.onAuthStateChanged(async (u) => {
           if (u) {
@@ -128,7 +114,6 @@
               uid: u.uid,
               email: u.email,
               online: true,
-              lastReadTimestamps: {},
               lastSeen: new Date()
             }, { merge: true });
             setUser(u);
@@ -139,19 +124,7 @@
           }
           setLoading(false);
         });
-
-        // Efek untuk log keluar automatik
-        const handleBeforeUnload = async () => {
-          if (auth.currentUser) {
-            await db.collection('users').doc(auth.currentUser.uid).update({ online: false, lastSeen: new Date() });
-          }
-        };
-        window.addEventListener('beforeunload', handleBeforeUnload);
-
-        return () => {
-          unsub();
-          window.removeEventListener('beforeunload', handleBeforeUnload);
-        };
+        return () => unsub();
       }, []);
 
       useEffect(() => {
@@ -167,6 +140,13 @@
       const playNotif = () => {
         notificationSound.currentTime = 0;
         notificationSound.play().catch(() => {});
+      };
+
+      const handleLogout = async () => {
+        await db.collection('users').doc(user.uid).update({ online: false, lastSeen: new Date() });
+        await auth.signOut();
+        setUser(null);
+        showAlert("Berjaya log keluar", "success");
       };
 
       const handleReactionPick = async (emoji) => {
@@ -197,14 +177,14 @@
               showAlert={showAlert}
               setReactionState={setReactionState}
               playNotif={playNotif}
-              unreadCounts={unreadCounts}
-              setUnreadCounts={setUnreadCounts}
-              lastReadTimestamps={lastReadTimestamps}
-              setLastReadTimestamps={setLastReadTimestamps}
-              onlineUsers={onlineUsers}
-              setOnlineUsers={setOnlineUsers}
-              channels={channels}
-              setChannels={setChannels}
+              pinnedMessages={pinnedMessages}
+              setPinnedMessages={setPinnedMessages}
+              starredMessages={starredMessages}
+              setStarredMessages={setStarredMessages}
+              showStarred={showStarred}
+              setShowStarred={setShowStarred}
+              replyTo={replyTo}
+              setReplyTo={setReplyTo}
             />
           ) : (
             <AuthScreen setAuthStep={setAuthStep} authStep={authStep} showAlert={showAlert} />
@@ -276,9 +256,11 @@
     const ChatApp = ({
       user, isAdmin, darkMode, setDarkMode, textSize, setTextSize,
       handleLogout, showAlert, setReactionState, playNotif,
-      unreadCounts, setUnreadCounts, lastReadTimestamps, setLastReadTimestamps,
-      onlineUsers, setOnlineUsers, channels, setChannels
+      pinnedMessages, setPinnedMessages, starredMessages, setStarredMessages,
+      showStarred, setShowStarred, replyTo, setReplyTo
     }) => {
+      const [channels, setChannels] = useState([]);
+      const [onlineUsers, setOnlineUsers] = useState([]);
       const [activeChat, setActiveChat] = useState(null);
       const [messages, setMessages] = useState([]);
       const [newMessage, setNewMessage] = useState('');
@@ -290,80 +272,55 @@
 
       const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 
-      // Efek untuk mengambil data channels, users dan unread messages
       useEffect(() => {
         const unsubCh = db.collection('channels').onSnapshot(s => {
           setChannels(s.docs.map(d => ({ id: d.id, ...d.data() })));
         });
-
         const unsubU = db.collection('users').onSnapshot(s => {
           setOnlineUsers(s.docs.map(d => ({ id: d.id, ...d.data() })));
         });
-
-        if (user) {
-          const unsubUserDoc = db.collection('users').doc(user.uid).onSnapshot(doc => {
-            const data = doc.data();
-            if (data?.lastReadTimestamps) {
-              setLastReadTimestamps(data.lastReadTimestamps);
-            }
-          });
-          return () => { unsubCh(); unsubU(); unsubUserDoc(); };
-        }
         return () => { unsubCh(); unsubU(); };
-      }, [user]);
+      }, []);
 
-      // Efek untuk mendapatkan mesej dan menjejak mesej belum dibaca
       useEffect(() => {
-        if (!activeChat?.id) return;
-
-        // Mendapatkan mesej
-        const unsub = db.collection('messages')
-          .where('chatId', '==', activeChat.id)
-          .orderBy('timestamp', 'asc')
-          .onSnapshot(snap => {
-            const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            setMessages(msgs);
-            
-            // Mengira mesej belum dibaca
-            const unread = msgs.filter(m => {
-              const lastRead = lastReadTimestamps[activeChat.id]?.toDate() || new Date(0);
-              return m.timestamp.toDate() > lastRead && m.senderId !== user.uid;
-            });
-            
-            setUnreadCounts(prev => ({ ...prev, [activeChat.id]: unread.length }));
-            
-            if (unread.length > 0) playNotif();
-            scrollToBottom();
-          }, err => console.error("Snapshot error:", err));
-        
-        return () => unsub();
-      }, [activeChat, lastReadTimestamps]);
-
-      // Fungsi untuk mengemas kini timestamp terakhir dibaca
-      const updateLastRead = (chatId) => {
-        if (user) {
-          const updateData = { [`lastReadTimestamps.${chatId}`]: new Date() };
-          db.collection('users').doc(user.uid).update(updateData);
+        if (!activeChat?.id && !showStarred) return;
+        let query;
+        if (showStarred) {
+          query = db.collection('messages').where('starred', '==', true).orderBy('timestamp', 'desc');
+        } else {
+          query = db.collection('messages')
+            .where('chatId', '==', activeChat.id)
+            .orderBy('timestamp', 'asc');
         }
-      };
+        const unsub = query.onSnapshot(snap => {
+          const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          setMessages(msgs);
+          if (!showStarred) {
+            const newMsg = msgs.filter(m => m.timestamp?.seconds > (Date.now() / 1000) - 30 && m.senderId !== user.uid);
+            if (newMsg.length > 0) playNotif();
+          }
+          scrollToBottom();
+        }, err => console.error("Snapshot error:", err));
+        return () => unsub();
+      }, [activeChat, showStarred]);
 
       const sendMessage = async () => {
         if (!newMessage.trim()) return;
-        const msgData = {
+        await db.collection('messages').add({
           text: newMessage,
           senderId: user.uid,
           senderEmail: user.email,
           chatId: activeChat?.id,
           timestamp: new Date(),
           type: activeChat?.type,
+          replyTo: replyTo,
           edited: false,
           starred: false,
           pinned: false,
           reactions: {}
-        };
-        await db.collection('messages').add(msgData);
+        });
         setNewMessage('');
-        updateLastRead(activeChat.id);
+        setReplyTo(null);
       };
 
       const createChannel = async () => {
@@ -374,7 +331,7 @@
       };
 
       const filteredChannels = channels.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
-      const filteredUsers = onlineUsers.filter(u => u.id !== user.uid && u.email.toLowerCase().includes(searchQuery.toLowerCase()));
+      const filteredUsers = onlineUsers.filter(u => u.online && u.email.toLowerCase().includes(searchQuery.toLowerCase()));
       
       const handleContextMenu = (e, message) => {
         e.preventDefault();
@@ -416,51 +373,61 @@
             </div>
 
             <div className="flex-1 overflow-y-auto p-2">
-              <h3 className="font-semibold mb-2">Online ({onlineUsers.length - 1})</h3>
-              {filteredUsers.map(u => {
-                const dmChatId = [user.uid, u.id].sort().join('_');
-                const unread = unreadCounts[dmChatId] > 0;
-                return (
-                  <div key={u.id} className="flex items-center p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-sm cursor-pointer" onClick={() => {
-                    setActiveChat({ type: 'dm', id: dmChatId, name: u.email });
-                    updateLastRead(dmChatId);
-                  }}>
-                    <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center text-white text-xs">{u.email[0].toUpperCase()}</div>
-                    <span className="ml-2">{u.email}</span>
-                    {unread && <span className="ml-auto bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{unreadCounts[dmChatId]}</span>}
+              {!showStarred ? (
+                <>
+                  <h3 className="font-semibold mb-2">Online ({onlineUsers.length})</h3>
+                  {filteredUsers.map(u => (
+                    <div key={u.id} className="flex items-center p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-sm cursor-pointer" onClick={() => setActiveChat({ type: 'dm', id: [user.uid, u.id].sort().join('_'), name: u.email })}>
+                      <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center text-white text-xs">{u.email[0].toUpperCase()}</div>
+                      <span className="ml-2">{u.email}</span>
+                    </div>
+                  ))}
+
+                  <div className="flex justify-between mt-4">
+                    <h3 className="font-semibold">Channels</h3>
+                    {isAdmin && <button onClick={() => setShowCreate(true)} className="text-xs bg-blue-100 dark:bg-blue-900 px-1 rounded">+</button>}
+                    <button onClick={() => setShowStarred(true)} className="text-xs bg-yellow-100 dark:bg-yellow-900 px-1 rounded">⭐</button>
                   </div>
-                )
-              })}
 
-              <div className="flex justify-between mt-4">
-                <h3 className="font-semibold">Channels</h3>
-                {isAdmin && <button onClick={() => setShowCreate(true)} className="text-xs bg-blue-100 dark:bg-blue-900 px-1 rounded">+</button>}
-              </div>
+                  {showCreate && isAdmin && (
+                    <div className="p-2 border rounded bg-gray-50 dark:bg-gray-700 mb-2">
+                      <input placeholder="Nama channel" value={newChan} onChange={e => setNewChan(e.target.value)} className="w-full p-1 mb-1 border rounded text-sm dark:bg-gray-600" />
+                      <textarea placeholder="Deskripsi" value={newDesc} onChange={e => setNewDesc(e.target.value)} className="w-full p-1 mb-1 border rounded text-sm dark:bg-gray-600" rows="1" />
+                      <button onClick={createChannel} className="bg-green-500 text-white px-2 py-0.5 text-xs rounded mr-1">Buat</button>
+                      <button onClick={() => setShowCreate(false)} className="bg-gray-300 dark:bg-gray-600 px-2 py-0.5 text-xs rounded">Batal</button>
+                    </div>
+                  )}
 
-              {showCreate && isAdmin && (
-                <div className="p-2 border rounded bg-gray-50 dark:bg-gray-700 mb-2">
-                  <input placeholder="Nama channel" value={newChan} onChange={e => setNewChan(e.target.value)} className="w-full p-1 mb-1 border rounded text-sm dark:bg-gray-600" />
-                  <textarea placeholder="Deskripsi" value={newDesc} onChange={e => setNewDesc(e.target.value)} className="w-full p-1 mb-1 border rounded text-sm dark:bg-gray-600" rows="1" />
-                  <button onClick={createChannel} className="bg-green-500 text-white px-2 py-0.5 text-xs rounded mr-1">Buat</button>
-                  <button onClick={() => setShowCreate(false)} className="bg-gray-300 dark:bg-gray-600 px-2 py-0.5 text-xs rounded">Batal</button>
+                  {filteredChannels.map(c => (
+                    <div key={c.id} className="flex justify-between items-center p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-sm">
+                      <span onClick={() => { setActiveChat({ type: 'channel', id: c.id, name: c.name, description: c.description }); setShowStarred(false); }} className="cursor-pointer">#{c.name}</span>
+                      {isAdmin && <button onClick={() => db.collection('channels').doc(c.id).delete()} className="text-xs text-red-700">×</button>}
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <div>
+                  <h3 className="font-semibold mb-2">⭐ Mesej Bertanda</h3>
+                  {messages.length === 0 ? (
+                    <p className="text-sm text-gray-500">Tiada mesej bertanda</p>
+                  ) : (
+                    messages.map(m => (
+                      <div key={m.id} className="p-2 border-b dark:border-gray-700 text-sm">
+                        <p className="text-xs text-gray-500">Dari: {m.senderEmail}</p>
+                        <p>{m.text}</p>
+                      </div>
+                    ))
+                  )}
+                  <button onClick={() => setShowStarred(false)} className="mt-2 text-blue-500 text-sm">← Kembali</button>
                 </div>
               )}
-
-              {filteredChannels.map(c => {
-                const unread = unreadCounts[c.id] > 0;
-                return (
-                  <div key={c.id} className="flex justify-between items-center p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-sm">
-                    <span onClick={() => { setActiveChat({ type: 'channel', id: c.id, name: c.name, description: c.description }); updateLastRead(c.id); }} className="cursor-pointer">#{c.name}</span>
-                    {unread && <span className="ml-auto bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{unreadCounts[c.id]}</span>}
-                    {isAdmin && <button onClick={() => db.collection('channels').doc(c.id).delete()} className="text-xs text-red-700">×</button>}
-                  </div>
-                )
-              })}
             </div>
           </div>
 
           {/* Chat Area */}
-          {!activeChat ? (
+          {showStarred ? (
+            <div className="flex-1 flex items-center justify-center text-gray-500">Pilih mesej di atas</div>
+          ) : !activeChat ? (
             <div className="flex-1 flex items-center justify-center text-gray-500">Pilih channel atau pengguna</div>
           ) : (
             <div className="flex-1 flex flex-col">
@@ -468,6 +435,12 @@
                 <h2 className="font-bold">{activeChat.name}</h2>
                 {activeChat.description && <span className="ml-2 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-2 py-1 rounded">{activeChat.description}</span>}
               </div>
+
+              {pinnedMessages.length > 0 && (
+                <div className="bg-yellow-50 dark:bg-yellow-900 border-b p-2 text-xs">
+                  {pinnedMessages.map(m => <div key={m.id}>📌 {m.text.substring(0, 30)}...</div>)}
+                </div>
+              )}
 
               <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
                 {messages.map(m => (
@@ -479,6 +452,12 @@
                     <div className={`max-w-xs lg:max-w-md px-3 py-2 rounded-lg ${
                       m.senderId === user.uid ? 'bg-blue-500 text-white' : 'bg-white dark:bg-gray-700 shadow'
                     }`}>
+                      {m.replyTo && (
+                        <div className="bg-gray-200 dark:bg-gray-600 text-xs p-1 mb-1 rounded">
+                          <p className="text-gray-600 dark:text-gray-300">Balas kepada {m.replyTo.sender}</p>
+                          <p className="truncate">{m.replyTo.text}</p>
+                        </div>
+                      )}
                       <p className="text-sm">{m.text}</p>
                       <p className="text-xs mt-1 opacity-70">
                         {new Date(m.timestamp?.seconds * 1000).toLocaleTimeString()}
@@ -497,6 +476,16 @@
                 <div ref={messagesEndRef} />
               </div>
 
+              {/* Reply Box + Input */}
+              {replyTo && (
+                <div className="bg-gray-100 dark:bg-gray-700 p-2 text-sm flex items-center">
+                  <div className="flex-1">
+                    <p className="text-xs text-gray-500">Balas kepada {replyTo.sender}</p>
+                    <p className="truncate">{replyTo.text}</p>
+                  </div>
+                  <button onClick={() => setReplyTo(null)} className="text-red-500 ml-2">✕</button>
+                </div>
+              )}
               <div className="p-3 bg-white dark:bg-gray-800 border-t">
                 <div className="flex relative">
                   <input
